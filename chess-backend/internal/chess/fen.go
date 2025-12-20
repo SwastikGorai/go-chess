@@ -245,6 +245,8 @@ func LoadFEN(fen string) (*Board, error) {
 	b.halfMove = half
 	b.fullMove = full
 
+	b.zkey = b.computeZobrist()
+
 	return b, nil
 }
 
