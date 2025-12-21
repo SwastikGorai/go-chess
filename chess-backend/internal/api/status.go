@@ -1,5 +1,7 @@
 package api
 
+import "chess-backend/internal/store"
+
 const (
 	resultOngoing   = "ongoing"
 	resultCheckmate = "checkmate"
@@ -25,13 +27,13 @@ type Status struct {
 	Flags   Flags
 }
 
-func computeStatus(game *Game) Status {
+func computeStatus(game *store.Game) Status {
 	board := game.Board
 	flags := Flags{
 		InCheck: board.InCheck(board.Turn()),
 	}
 
-	if game.Result != "" {
+	if game.Result != "" && game.Result != resultOngoing {
 		applyStoredStatus(&flags, game.Result, game.EndedBy)
 		return Status{
 			Result:  game.Result,
