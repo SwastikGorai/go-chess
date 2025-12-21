@@ -153,29 +153,40 @@ func (s *PostgresStore) UpdateGame(ctx context.Context, game *Game) error {
 }
 
 func (s *PostgresStore) UpdateGameWithMove(ctx context.Context, game *Game, move string) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback(ctx)
-		}
-	}()
-
-	update := `
-		UPDATE games
-		SET current_fen = $2,
-		    result = $3,
-		    winner = $4,
-		    ended_by = $5,
-		    pending_draw_offer_by = $6,
-		    updated_at = $7
-		WHERE id = $1
+	query := `
+		WITH updated AS (
+			UPDATE games
+			SET current_fen = $2,
+			    result = $3,
+			    winner = $4,
+			    ended_by = $5,
+			    pending_draw_offer_by = $6,
+			    updated_at = $7
+			WHERE id = $1
+			RETURNING id
+		),
+		next_ply AS (
+			SELECT COALESCE(MAX(ply), 0) + 1 AS ply
+			FROM moves
+			WHERE game_id = $1
+		),
+		inserted AS (
+			INSERT INTO moves (game_id, ply, move_number, color, uci, created_at)
+			SELECT
+				$1,
+				next_ply.ply,
+				(next_ply.ply + 1) / 2,
+				CASE WHEN next_ply.ply % 2 = 1 THEN 'w' ELSE 'b' END,
+				$8,
+				$7
+			FROM next_ply
+			RETURNING 1
+		)
+		SELECT 1 FROM updated, inserted
 	`
-	ct, err := tx.Exec(
+	err := s.pool.QueryRow(
 		ctx,
-		update,
+		query,
 		game.ID,
 		game.Board.ToFEN(),
 		normalizeResult(game.Result),
@@ -183,42 +194,12 @@ func (s *PostgresStore) UpdateGameWithMove(ctx context.Context, game *Game, move
 		nullIfEmpty(game.EndedBy),
 		colorToNullableString(game.PendingDrawOfferBy),
 		game.UpdatedAt,
-	)
+		move,
+	).Scan(new(int))
 	if err != nil {
-		return err
-	}
-	if ct.RowsAffected() == 0 {
-		_ = tx.Rollback(ctx)
-		return ErrNotFound
-	}
-
-	var currentPly int
-	plyQuery := `
-		SELECT COALESCE(MAX(ply), 0)
-		FROM moves
-		WHERE game_id = $1
-	`
-	err = tx.QueryRow(ctx, plyQuery, game.ID).Scan(&currentPly)
-	if err != nil {
-		return err
-	}
-	nextPly := currentPly + 1
-	moveNumber := (nextPly + 1) / 2
-	color := "w"
-	if nextPly%2 == 0 {
-		color = "b"
-	}
-
-	insert := `
-		INSERT INTO moves (game_id, ply, move_number, color, uci, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`
-	_, err = tx.Exec(ctx, insert, game.ID, nextPly, moveNumber, color, move, game.UpdatedAt)
-	if err != nil {
-		return err
-	}
-
-	if err = tx.Commit(ctx); err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrNotFound
+		}
 		return err
 	}
 	return nil
