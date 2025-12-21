@@ -7,6 +7,8 @@ import (
 
 	"chess-backend/internal/api"
 
+	"chess-backend/internal/api"
+
 	"github.com/gin-gonic/gin"
 )
 
