@@ -101,7 +101,7 @@ func (s *PostgresStore) GetGame(ctx context.Context, id string) (*Game, error) {
 		ID:        gameID,
 		Board:     board,
 		StartFEN:  startFEN,
-		Result:   result,
+		Result:    result,
 		CreatedAt: created,
 		UpdatedAt: updated,
 	}
@@ -192,11 +192,28 @@ func (s *PostgresStore) UpdateGameWithMove(ctx context.Context, game *Game, move
 		return ErrNotFound
 	}
 
-	insert := `
-		INSERT INTO moves (game_id, uci, created_at)
-		VALUES ($1, $2, $3)
+	var currentPly int
+	plyQuery := `
+		SELECT COALESCE(MAX(ply), 0)
+		FROM moves
+		WHERE game_id = $1
 	`
-	_, err = tx.Exec(ctx, insert, game.ID, move, game.UpdatedAt)
+	err = tx.QueryRow(ctx, plyQuery, game.ID).Scan(&currentPly)
+	if err != nil {
+		return err
+	}
+	nextPly := currentPly + 1
+	moveNumber := (nextPly + 1) / 2
+	color := "w"
+	if nextPly%2 == 0 {
+		color = "b"
+	}
+
+	insert := `
+		INSERT INTO moves (game_id, ply, move_number, color, uci, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	_, err = tx.Exec(ctx, insert, game.ID, nextPly, moveNumber, color, move, game.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -212,7 +229,7 @@ func (s *PostgresStore) ListMoves(ctx context.Context, id string) ([]string, err
 		SELECT uci
 		FROM moves
 		WHERE game_id = $1
-		ORDER BY id ASC
+		ORDER BY ply ASC
 	`
 	rows, err := s.pool.Query(ctx, query, id)
 	if err != nil {

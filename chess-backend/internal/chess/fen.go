@@ -130,7 +130,6 @@ func intToString(n int) string {
 	return string(buf[i:])
 }
 
-
 func LoadFEN(fen string) (*Board, error) {
 
 	fields := strings.Fields(fen)
