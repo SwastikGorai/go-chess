@@ -13,7 +13,6 @@ func TestToFEN_StartingPosition(t *testing.T) {
 	}
 }
 
-
 func TestLoadFEN_StartingPosition_RoundTrip(t *testing.T) {
 	fen := "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 	b, err := LoadFEN(fen)
@@ -27,7 +26,8 @@ func TestLoadFEN_StartingPosition_RoundTrip(t *testing.T) {
 	}
 }
 
-//  black to move
+//	black to move
+//
 // only white kingside castling right
 // en passant target e3
 // halfmove=12 fullmove=7
