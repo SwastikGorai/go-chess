@@ -62,8 +62,10 @@ type MoveResponse struct {
 }
 
 type StatusResponse struct {
-	Result string `json:"result"`
-	Flags  Flags  `json:"flags"`
+	Result  string `json:"result"`
+	Winner  string `json:"winner,omitempty"`
+	EndedBy string `json:"endedBy,omitempty"`
+	Flags   Flags  `json:"flags"`
 }
 
 type HistoryResponse struct {
