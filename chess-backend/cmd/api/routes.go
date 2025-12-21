@@ -7,8 +7,6 @@ import (
 
 	"chess-backend/internal/api"
 
-	"chess-backend/internal/api"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,7 +22,7 @@ func (app *app) routes() http.Handler {
 	v1 := g.Group("/api/v1")
 	v1.Use(api.NoopAuthMiddleware())
 	handlers := api.NewHandlers(app.store)
-	const generalTimeout = 7*time.Second
+	const generalTimeout = 7 * time.Second
 	{
 		v1.POST("/games", withTimeout(generalTimeout, handlers.CreateGame))
 		v1.GET("/games/:id", withTimeout(generalTimeout, handlers.GetGame))
