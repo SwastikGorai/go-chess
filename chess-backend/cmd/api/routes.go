@@ -12,6 +12,7 @@ import (
 
 func (app *app) routes() http.Handler {
 	g := gin.Default()
+	g.Use(api.CORSMiddleware())
 
 	health := g.Group("/health")
 	{
