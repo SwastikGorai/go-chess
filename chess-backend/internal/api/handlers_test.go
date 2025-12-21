@@ -7,14 +7,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"chess-backend/internal/store"
+
 	"github.com/gin-gonic/gin"
 )
 
 func TestCreateGameAndIllegalMove(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	store := NewStore()
-	handlers := NewHandlers(store)
+	memStore := store.NewMemoryStore()
+	handlers := NewHandlers(memStore)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
 	v1.POST("/games", handlers.CreateGame)

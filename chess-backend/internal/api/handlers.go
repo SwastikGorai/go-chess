@@ -1,21 +1,23 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"chess-backend/internal/chess"
+	"chess-backend/internal/store"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Handlers struct {
-	store *Store
+	store store.GameStore
 }
 
-func NewHandlers(store *Store) *Handlers {
+func NewHandlers(store store.GameStore) *Handlers {
 	return &Handlers{store: store}
 }
 
@@ -38,14 +40,14 @@ func (h *Handlers) CreateGame(c *gin.Context) {
 		}
 	}
 
-	id, err := newGameID()
+	id, err := store.NewGameID()
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "failed to create game id")
 		return
 	}
 
 	now := time.Now().UTC()
-	game := &Game{
+	game := &store.Game{
 		ID:        id,
 		Board:     board,
 		StartFEN:  board.ToFEN(),
@@ -54,10 +56,16 @@ func (h *Handlers) CreateGame(c *gin.Context) {
 		UpdatedAt: now,
 	}
 
-	h.store.mu.Lock()
-	h.store.games[id] = game
+	status := computeStatus(game)
+	game.Result = status.Result
+	game.Winner = status.Winner
+	game.EndedBy = status.EndedBy
+
+	if err := h.store.CreateGame(c.Request.Context(), game); err != nil {
+		writeError(c, http.StatusInternalServerError, "failed to store game")
+		return
+	}
 	response := buildGameResponse(game)
-	h.store.mu.Unlock()
 
 	c.JSON(http.StatusOK, response)
 }
@@ -65,15 +73,12 @@ func (h *Handlers) CreateGame(c *gin.Context) {
 func (h *Handlers) GetGame(c *gin.Context) {
 	id := c.Param("id")
 
-	h.store.mu.RLock()
-	game, ok := h.store.games[id]
-	if !ok {
-		h.store.mu.RUnlock()
-		writeError(c, http.StatusNotFound, "game not found")
+	game, err := h.store.GetGame(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
 		return
 	}
 	response := buildGameResponse(game)
-	h.store.mu.RUnlock()
 
 	c.JSON(http.StatusOK, response)
 }
@@ -92,11 +97,9 @@ func (h *Handlers) LegalMoves(c *gin.Context) {
 		fromSquare = &sq
 	}
 
-	h.store.mu.RLock()
-	game, ok := h.store.games[id]
-	if !ok {
-		h.store.mu.RUnlock()
-		writeError(c, http.StatusNotFound, "game not found")
+	game, err := h.store.GetGame(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
 		return
 	}
 
@@ -108,7 +111,6 @@ func (h *Handlers) LegalMoves(c *gin.Context) {
 		}
 		moves = append(moves, uciFromMove(m))
 	}
-	h.store.mu.RUnlock()
 
 	c.JSON(http.StatusOK, LegalMovesResponse{Moves: moves})
 }
@@ -128,32 +130,37 @@ func (h *Handlers) MakeMove(c *gin.Context) {
 		return
 	}
 
-	h.store.mu.Lock()
-	game, ok := h.store.games[id]
-	if !ok {
-		h.store.mu.Unlock()
-		writeError(c, http.StatusNotFound, "game not found")
+	game, err := h.store.GetGame(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
 		return
 	}
 
 	status := computeStatus(game)
 	if status.Result != resultOngoing {
-		h.store.mu.Unlock()
 		writeError(c, http.StatusConflict, "game already finished")
 		return
 	}
 
 	if err := game.Board.MakeMove(move); err != nil {
-		h.store.mu.Unlock()
 		writeError(c, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
-	game.Moves = append(game.Moves, uciFromMove(move))
+	moveUCI := uciFromMove(move)
 	game.PendingDrawOfferBy = nil
 	game.UpdatedAt = time.Now().UTC()
+
+	status = computeStatus(game)
+	game.Result = status.Result
+	game.Winner = status.Winner
+	game.EndedBy = status.EndedBy
+
+	if err := h.store.UpdateGameWithMove(c.Request.Context(), game, moveUCI); err != nil {
+		handleStoreError(c, err)
+		return
+	}
 	response := buildMoveResponse(game)
-	h.store.mu.Unlock()
 
 	c.JSON(http.StatusOK, response)
 }
@@ -161,35 +168,29 @@ func (h *Handlers) MakeMove(c *gin.Context) {
 func (h *Handlers) Status(c *gin.Context) {
 	id := c.Param("id")
 
-	h.store.mu.RLock()
-	game, ok := h.store.games[id]
-	if !ok {
-		h.store.mu.RUnlock()
-		writeError(c, http.StatusNotFound, "game not found")
+	game, err := h.store.GetGame(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
 		return
 	}
 	status := computeStatus(game)
-	h.store.mu.RUnlock()
 
 	c.JSON(http.StatusOK, StatusResponse{
-		Result: status.Result,
-		Flags:  status.Flags,
+		Result:  status.Result,
+		Winner:  status.Winner,
+		EndedBy: status.EndedBy,
+		Flags:   status.Flags,
 	})
 }
 
 func (h *Handlers) History(c *gin.Context) {
 	id := c.Param("id")
 
-	h.store.mu.RLock()
-	game, ok := h.store.games[id]
-	if !ok {
-		h.store.mu.RUnlock()
-		writeError(c, http.StatusNotFound, "game not found")
+	moves, err := h.store.ListMoves(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
 		return
 	}
-	moves := make([]string, len(game.Moves))
-	copy(moves, game.Moves)
-	h.store.mu.RUnlock()
 
 	c.JSON(http.StatusOK, HistoryResponse{
 		ID:    id,
@@ -212,17 +213,14 @@ func (h *Handlers) Resign(c *gin.Context) {
 		return
 	}
 
-	h.store.mu.Lock()
-	game, ok := h.store.games[id]
-	if !ok {
-		h.store.mu.Unlock()
-		writeError(c, http.StatusNotFound, "game not found")
+	game, err := h.store.GetGame(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
 		return
 	}
 
 	status := computeStatus(game)
 	if status.Result != resultOngoing {
-		h.store.mu.Unlock()
 		writeError(c, http.StatusConflict, "game already finished")
 		return
 	}
@@ -234,7 +232,10 @@ func (h *Handlers) Resign(c *gin.Context) {
 	game.UpdatedAt = time.Now().UTC()
 
 	status = computeStatus(game)
-	h.store.mu.Unlock()
+	if err := h.store.UpdateGame(c.Request.Context(), game); err != nil {
+		handleStoreError(c, err)
+		return
+	}
 
 	c.JSON(http.StatusOK, ResignResponse{
 		Result:  status.Result,
@@ -259,24 +260,27 @@ func (h *Handlers) OfferDraw(c *gin.Context) {
 		return
 	}
 
-	h.store.mu.Lock()
-	game, ok := h.store.games[id]
-	if !ok {
-		h.store.mu.Unlock()
-		writeError(c, http.StatusNotFound, "game not found")
+	game, err := h.store.GetGame(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
 		return
 	}
 
 	status := computeStatus(game)
 	if status.Result != resultOngoing {
-		h.store.mu.Unlock()
 		writeError(c, http.StatusConflict, "game already finished")
 		return
 	}
 
+	game.Result = status.Result
+	game.Winner = status.Winner
+	game.EndedBy = status.EndedBy
 	game.PendingDrawOfferBy = &color
 	game.UpdatedAt = time.Now().UTC()
-	h.store.mu.Unlock()
+	if err := h.store.UpdateGame(c.Request.Context(), game); err != nil {
+		handleStoreError(c, err)
+		return
+	}
 
 	c.JSON(http.StatusOK, OfferDrawResponse{Offer: "pending"})
 }
@@ -296,28 +300,23 @@ func (h *Handlers) AcceptDraw(c *gin.Context) {
 		return
 	}
 
-	h.store.mu.Lock()
-	game, ok := h.store.games[id]
-	if !ok {
-		h.store.mu.Unlock()
-		writeError(c, http.StatusNotFound, "game not found")
+	game, err := h.store.GetGame(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
 		return
 	}
 
 	status := computeStatus(game)
 	if status.Result != resultOngoing {
-		h.store.mu.Unlock()
 		writeError(c, http.StatusConflict, "game already finished")
 		return
 	}
 
 	if game.PendingDrawOfferBy == nil {
-		h.store.mu.Unlock()
 		writeError(c, http.StatusConflict, "no pending draw offer")
 		return
 	}
 	if *game.PendingDrawOfferBy == color {
-		h.store.mu.Unlock()
 		writeError(c, http.StatusConflict, "draw offer must be accepted by opponent")
 		return
 	}
@@ -329,7 +328,10 @@ func (h *Handlers) AcceptDraw(c *gin.Context) {
 	game.UpdatedAt = time.Now().UTC()
 
 	status = computeStatus(game)
-	h.store.mu.Unlock()
+	if err := h.store.UpdateGame(c.Request.Context(), game); err != nil {
+		handleStoreError(c, err)
+		return
+	}
 
 	c.JSON(http.StatusOK, AcceptDrawResponse{
 		Result:  status.Result,
@@ -350,7 +352,7 @@ func parseColor(value string) (chess.Color, error) {
 	}
 }
 
-func buildGameResponse(game *Game) GameResponse {
+func buildGameResponse(game *store.Game) GameResponse {
 	status := computeStatus(game)
 	return GameResponse{
 		ID:       game.ID,
@@ -370,7 +372,7 @@ func buildGameResponse(game *Game) GameResponse {
 	}
 }
 
-func buildMoveResponse(game *Game) MoveResponse {
+func buildMoveResponse(game *store.Game) MoveResponse {
 	status := computeStatus(game)
 	return MoveResponse{
 		FEN:      game.Board.ToFEN(),
@@ -390,4 +392,12 @@ func writeError(c *gin.Context, code int, message string) {
 
 func isEmptyBody(err error) bool {
 	return strings.Contains(err.Error(), "EOF")
+}
+
+func handleStoreError(c *gin.Context, err error) {
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(c, http.StatusNotFound, "game not found")
+		return
+	}
+	writeError(c, http.StatusInternalServerError, "storage error")
 }
