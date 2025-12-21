@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"chess-backend/internal/api"
 	"chess-backend/internal/config"
 )
 
@@ -10,6 +11,7 @@ type app struct {
 	app_name   string
 	jwt_secret string
 	port       int
+	store      *api.Store
 	// database_models
 
 }
@@ -24,6 +26,7 @@ func main() {
 		app_name:   "Go-Chess",
 		jwt_secret: "sonme-secret-key",
 		port:       cfg.Server.Port,
+		store:      api.NewStore(),
 	}
 
 	if err := app.serve(); err != nil {
