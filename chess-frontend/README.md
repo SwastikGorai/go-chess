@@ -1,16 +1,50 @@
-# React + Vite
+# Go Chess Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React + Vite UI for the Go chess backend. Play locally (client-side rules) or host/join an online game backed by the API.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Local pass-and-play mode with client-side move validation
+- Online mode that syncs with the Go API (create/join by Game ID)
+- Theme controls for board and pieces
+- Resign, draw offer, and game status overlays
 
-## React Compiler
+## Requirements
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js 18+ (recommended)
 
-## Expanding the ESLint configuration
+## Quick start
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev
+```
+
+Vite will print the local dev URL (usually `http://localhost:5173`).
+
+## Configuration
+
+The app uses the backend API base URL from, in order:
+
+1. `VITE_API_BASE_URL` (build-time env)
+2. `window.CHESS_API_BASE_URL` (runtime, if injected)
+3. `http://localhost:8080` (default)
+
+Example `.env.local`:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8080
+```
+
+## Scripts
+
+- `npm run dev` - start the Vite dev server
+- `npm run build` - build for production
+- `npm run preview` - preview the production build
+- `npm run lint` - run ESLint
+
+## Notes and limitations
+
+- Local mode uses simplified rules (no castling/en passant yet).
+- Online mode uses server-side rules/validation from the Go backend.
+
