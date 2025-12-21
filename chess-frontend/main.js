@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Settings, 
   RefreshCw, 
   Moon, 
   Sun, 
   Trophy, 
-  RotateCcw, 
   Palette, 
   LayoutGrid, 
   Ghost,
@@ -18,16 +17,6 @@ import {
   Play,
   ArrowRight
 } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
-
-// --- FIREBASE SETUP ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- CHESS LOGIC & HELPERS ---
 
@@ -154,6 +143,64 @@ const isKingInCheck = (board, color) => {
   return false;
 };
 
+// --- BACKEND API HELPERS ---
+
+const API_BASE_URL = typeof window !== 'undefined' && window.CHESS_API_BASE_URL
+  ? window.CHESS_API_BASE_URL
+  : 'http://localhost:8080';
+
+const fetchJSON = async (path, options = {}) => {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (e) {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message = payload?.error || `Request failed with ${response.status}`;
+    throw new Error(message);
+  }
+
+  return payload;
+};
+
+const FILES = 'abcdefgh';
+
+const squareFromCoords = (r, c) => `${FILES[c]}${8 - r}`;
+
+const coordsFromSquare = (square) => {
+  const file = square[0].toLowerCase();
+  const rank = Number.parseInt(square[1], 10);
+  return { r: 8 - rank, c: FILES.indexOf(file) };
+};
+
+const parseFEN = (fen) => {
+  const [boardPart, activeColor] = fen.trim().split(/\s+/);
+  const rows = boardPart.split('/');
+  const board = rows.map((row) => {
+    const squares = [];
+    for (const char of row) {
+      if (char >= '1' && char <= '8') {
+        const count = Number.parseInt(char, 10);
+        for (let i = 0; i < count; i++) squares.push(null);
+      } else {
+        squares.push(char);
+      }
+    }
+    return squares;
+  });
+  return {
+    board,
+    turn: activeColor === 'b' ? 'black' : 'white',
+  };
+};
+
 
 // --- ASSETS & THEMES ---
 
@@ -223,9 +270,9 @@ const App = () => {
   const [joinId, setJoinId] = useState(''); // Input for joining game
   
   // Game Session State
-  const [user, setUser] = useState(null);
   const [gameId, setGameId] = useState(null); // Current Active Game ID (null = local)
   const [isLoading, setIsLoading] = useState(false);
+  const [validUciMoves, setValidUciMoves] = useState([]);
   
   // Settings State
   const [darkMode, setDarkMode] = useState(true);
@@ -237,61 +284,88 @@ const App = () => {
   const moveSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2070/2070-preview.mp3'), []);
   const captureSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2072/2072-preview.mp3'), []);
 
-  // --- FIREBASE AUTH & SYNC ---
-  
-  // 1. Init Auth
+  // --- BACKEND SYNC ---
+
+  const formatEndedBy = (endedBy) => {
+    switch (endedBy) {
+      case 'checkmate':
+        return 'Checkmate';
+      case 'stalemate':
+        return 'Stalemate';
+      case 'resignation':
+        return 'Resigned';
+      case 'draw_agreement':
+        return 'Draw agreed';
+      case 'draw_claim':
+        return 'Draw claimed';
+      case 'insufficient_material':
+        return 'Insufficient material';
+      case 'fifty_move':
+        return 'Fifty-move rule';
+      default:
+        return null;
+    }
+  };
+
+  const normalizeWinner = (winnerValue, resultValue) => {
+    if (!winnerValue || winnerValue === 'none' || resultValue === 'draw' || resultValue === 'stalemate') {
+      return 'Draw';
+    }
+    return winnerValue.charAt(0).toUpperCase() + winnerValue.slice(1);
+  };
+
+  const applyGameState = (data) => {
+    const { board: nextBoard, turn: nextTurn } = parseFEN(data.fen);
+    setBoard(nextBoard);
+    setTurn(nextTurn);
+    setCheck(Boolean(data.flags?.inCheck));
+
+    if (data.result && data.result !== 'ongoing') {
+      setWinner(normalizeWinner(data.winner, data.result));
+      setGameOverReason(formatEndedBy(data.endedBy) || data.result);
+    } else {
+      setWinner(null);
+      setGameOverReason(null);
+    }
+
+    setSelected(null);
+    setValidMoves([]);
+    setValidUciMoves([]);
+  };
+
+  const fetchGame = async () => {
+    const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}`);
+    applyGameState(payload);
+  };
+
+  // Poll game state for online games
   useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        try {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } catch (e) {
-          console.error("Custom token sign-in failed, falling back to anon:", e);
-          await signInAnonymously(auth);
-        }
-      } else {
-        await signInAnonymously(auth);
+    if (!gameId) return;
+
+    let cancelled = false;
+    const poll = async (showLoading) => {
+      try {
+        if (showLoading) setIsLoading(true);
+        await fetchGame();
+      } catch (e) {
+        if (!cancelled) console.error("Fetch game failed:", e);
+      } finally {
+        if (!cancelled && showLoading) setIsLoading(false);
       }
     };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
 
-  // 2. Sync Game Data when GameID changes
-  useEffect(() => {
-    if (!gameId || !user) return;
-
-    setIsLoading(true);
-    const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId);
-
-    const unsubscribe = onSnapshot(gameRef, (docSnap) => {
-      setIsLoading(false);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        // Parse board from JSON string (Firestore doesn't support nested arrays natively well)
-        try {
-            setBoard(JSON.parse(data.board));
-        } catch(e) { console.error("Board parse error", e); }
-        
-        setTurn(data.turn);
-        setWinner(data.winner || null);
-        setGameOverReason(data.gameOverReason || null);
-      } else {
-        // Game doesn't exist? Maybe go back to local
-        console.log("Game not found");
-      }
-    }, (error) => {
-        console.error("Snapshot error:", error);
-        setIsLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [gameId, user]);
+    poll(true);
+    const interval = setInterval(() => poll(false), 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [gameId]);
 
   // --- GAME LOGIC ---
 
   useEffect(() => {
+    if (gameId) return;
     // Check game state on every turn change (Runs on both local and synced updates)
     const inCheck = isKingInCheck(board, turn);
     setCheck(inCheck);
@@ -319,21 +393,93 @@ const App = () => {
   const handleGameOver = async (winnerName, reason) => {
     setWinner(winnerName);
     setGameOverReason(reason);
-    
-    // If online, sync game over state
-    if (gameId && user) {
-        try {
-            const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId);
-            await updateDoc(gameRef, {
-                winner: winnerName,
-                gameOverReason: reason
-            });
-        } catch(e) { console.error("Error updating winner", e); }
-    }
   };
 
   const handleSquareClick = async (r, c) => {
     if (winner) return;
+
+    if (gameId) {
+      const piece = board[r][c];
+      if (piece && getPieceColor(piece) === turn) {
+        if (selected?.r === r && selected?.c === c) {
+          setSelected(null);
+          setValidMoves([]);
+          setValidUciMoves([]);
+        } else {
+          setSelected({ r, c });
+          setIsLoading(true);
+          try {
+            const from = squareFromCoords(r, c);
+            const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}/legal-moves?from=${encodeURIComponent(from)}`);
+            const uniqueTargets = new Map();
+            payload.moves.forEach((uci) => {
+              const target = uci.slice(2, 4);
+              if (!uniqueTargets.has(target)) {
+                uniqueTargets.set(target, coordsFromSquare(target));
+              }
+            });
+            setValidMoves([...uniqueTargets.values()]);
+            setValidUciMoves(payload.moves);
+          } catch (e) {
+            console.error("Legal moves fetch failed:", e);
+            setValidMoves([]);
+            setValidUciMoves([]);
+          } finally {
+            setIsLoading(false);
+          }
+        }
+        return;
+      }
+
+      const move = validMoves.find(m => m.r === r && m.c === c);
+      if (selected && move) {
+        const from = squareFromCoords(selected.r, selected.c);
+        const to = squareFromCoords(r, c);
+        const movingPiece = board[selected.r][selected.c];
+        const isPromotion = movingPiece?.toLowerCase() === 'p' && (r === 0 || r === 7);
+        const uci = `${from}${to}${isPromotion ? 'q' : ''}`;
+
+        if (!validUciMoves.includes(uci)) return;
+
+        const isCapture = board[r][c] !== null;
+        setIsLoading(true);
+        try {
+          const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}/moves`, {
+            method: 'POST',
+            body: JSON.stringify({ uci }),
+          });
+          const { board: nextBoard, turn: nextTurn } = parseFEN(payload.fen);
+          setBoard(nextBoard);
+          setTurn(nextTurn);
+          setCheck(Boolean(payload.flags?.inCheck));
+
+          if (payload.result && payload.result !== 'ongoing') {
+            setWinner(normalizeWinner(payload.winner, payload.result));
+            setGameOverReason(formatEndedBy(payload.endedBy) || payload.result);
+          } else {
+            setWinner(null);
+            setGameOverReason(null);
+          }
+
+          setSelected(null);
+          setValidMoves([]);
+          setValidUciMoves([]);
+
+          if (isCapture) {
+            captureSound.currentTime = 0;
+            captureSound.play().catch(() => {});
+          } else {
+            moveSound.currentTime = 0;
+            moveSound.play().catch(() => {});
+          }
+        } catch (e) {
+          console.error("Move failed:", e);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+      return;
+    }
 
     // Selection Logic
     if (board[r][c] && getPieceColor(board[r][c]) === turn) {
@@ -376,16 +522,6 @@ const App = () => {
         moveSound.play().catch(() => {});
       }
 
-      // Sync to Firebase if Online
-      if (gameId && user) {
-          try {
-             const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId);
-             await updateDoc(gameRef, {
-                 board: JSON.stringify(newBoard),
-                 turn: nextTurn
-             });
-          } catch(e) { console.error("Error syncing move", e); }
-      }
     }
   };
 
@@ -399,6 +535,7 @@ const App = () => {
     setCheck(false);
     setSelected(null);
     setValidMoves([]);
+    setValidUciMoves([]);
     setGameOverReason(null);
     setGameId(null); // Clear ID -> Go Local
     setShowResignConfirm(false);
@@ -407,46 +544,38 @@ const App = () => {
 
   // 2. Create Online Game
   const createOnlineGame = async () => {
-    if (!user) return;
     setIsLoading(true);
-    const newId = Math.random().toString(36).substring(2, 8).toUpperCase();
-    
-    const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', newId);
-    
-    // Reset local state first
-    setBoard(INITIAL_BOARD);
-    setTurn('white');
-    setWinner(null);
-    setCheck(false);
-    setGameOverReason(null);
-    setSelected(null);
-    setValidMoves([]);
-
     try {
-        await setDoc(gameRef, {
-            board: JSON.stringify(INITIAL_BOARD),
-            turn: 'white',
-            winner: null,
-            gameOverReason: null,
-            createdAt: new Date().toISOString()
-        });
-        setGameId(newId);
-        setShowGameMenu(false);
-        setShowResignConfirm(false);
+      const payload = await fetchJSON('/api/v1/games', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      applyGameState(payload);
+      setGameId(payload.id);
+      setShowGameMenu(false);
+      setShowResignConfirm(false);
     } catch (e) {
-        console.error("Error creating game", e);
+      console.error("Error creating game", e);
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
   };
 
   // 3. Join Online Game
-  const joinOnlineGame = () => {
-      if (joinId.length > 0) {
-          setGameId(joinId); // This triggers the useEffect sync
-          setShowGameMenu(false);
-          setShowResignConfirm(false);
-      }
+  const joinOnlineGame = async () => {
+    if (joinId.length === 0) return;
+    setIsLoading(true);
+    try {
+      const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(joinId)}`);
+      applyGameState(payload);
+      setGameId(payload.id); // This triggers polling
+      setShowGameMenu(false);
+      setShowResignConfirm(false);
+    } catch (e) {
+      console.error("Error joining game", e);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // 4. Handle "New Game" Button Click
@@ -465,8 +594,28 @@ const App = () => {
       const opponent = turn === 'white' ? 'Black' : 'White';
       const reason = `${turn.charAt(0).toUpperCase() + turn.slice(1)} Resigned`;
       
-      // Update state locally and remotely
-      await handleGameOver(opponent, reason);
+      if (gameId) {
+        setIsLoading(true);
+        try {
+          const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}/resign`, {
+            method: 'POST',
+            body: JSON.stringify({ color: turn }),
+          });
+          setWinner(normalizeWinner(payload.winner, payload.result));
+          setGameOverReason(formatEndedBy(payload.endedBy) || payload.result);
+          setCheck(Boolean(payload.flags?.inCheck));
+          setSelected(null);
+          setValidMoves([]);
+          setValidUciMoves([]);
+        } catch (e) {
+          console.error("Resign failed:", e);
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        // Update state locally
+        await handleGameOver(opponent, reason);
+      }
       
       setShowResignConfirm(false);
       // Removed setShowGameMenu(true) so the "Win/Resign" popup shows first.
@@ -547,7 +696,7 @@ const App = () => {
             {winner && !showGameMenu && (
               <div className="absolute inset-0 z-40 bg-black/60 flex flex-col items-center justify-center backdrop-blur-sm animate-in fade-in">
                 <Trophy className="w-16 h-16 text-yellow-400 mb-4 animate-bounce" />
-                <h2 className="text-4xl font-bold text-white mb-1">{winner} Wins!</h2>
+                <h2 className="text-4xl font-bold text-white mb-1">{winner === 'Draw' ? 'Draw' : `${winner} Wins!`}</h2>
                 {gameOverReason && <p className="text-lg text-white/80 font-medium mb-4">{gameOverReason}</p>}
                 
                 <button 
@@ -634,8 +783,8 @@ const App = () => {
                                         type="text" 
                                         placeholder="Enter Game ID" 
                                         value={joinId}
-                                        onChange={(e) => setJoinId(e.target.value.toUpperCase())}
-                                        className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm font-mono uppercase focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
+                                        onChange={(e) => setJoinId(e.target.value)}
+                                        className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
                                     />
                                     <button 
                                         onClick={joinOnlineGame}
