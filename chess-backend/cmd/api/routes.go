@@ -26,6 +26,8 @@ func (app *app) routes() http.Handler {
 	{
 		v1.POST("/games", withTimeout(generalTimeout, handlers.CreateGame))
 		v1.GET("/games/:id", withTimeout(generalTimeout, handlers.GetGame))
+		v1.POST("/games/:id/join", withTimeout(generalTimeout, handlers.JoinGame))
+		v1.GET("/games/:id/stream", handlers.StreamGame)
 		v1.GET("/games/:id/legal-moves", withTimeout(generalTimeout, handlers.LegalMoves))
 		v1.POST("/games/:id/moves", withTimeout(generalTimeout, handlers.MakeMove))
 		v1.GET("/games/:id/status", withTimeout(generalTimeout, handlers.Status))

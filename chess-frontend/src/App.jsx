@@ -14,6 +14,7 @@ import {
   Globe,
   Copy,
   Users,
+  Eye,
   Play,
   ArrowRight,
 } from 'lucide-react';
@@ -208,7 +209,9 @@ const fetchJSON = async (path, options = {}) => {
 
   if (!response.ok) {
     const message = payload?.error || `Request failed with ${response.status}`;
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   return payload;
@@ -464,6 +467,8 @@ const Pieces = {
 
 const App = () => {
   const GAME_ID_STORAGE_KEY = 'go-chess:game-id';
+  const PLAYER_TOKEN_STORAGE_KEY = 'go-chess:player-token';
+  const PLAYER_COLOR_STORAGE_KEY = 'go-chess:player-color';
   const [board, setBoard] = useState(INITIAL_BOARD);
   const [turn, setTurn] = useState('white');
   const [selected, setSelected] = useState(null);
@@ -476,12 +481,17 @@ const App = () => {
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showGameMenu, setShowGameMenu] = useState(true); // Controls the New/Resume Game Popup
   const [joinId, setJoinId] = useState(''); // Input for joining game
+  const [showSpectatePrompt, setShowSpectatePrompt] = useState(false);
+  const [preferredColor, setPreferredColor] = useState('white');
 
   // Game Session State
   const [gameId, setGameId] = useState(null); // Current Active Game ID (null = local)
+  const [playerToken, setPlayerToken] = useState(null);
+  const [playerColor, setPlayerColor] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [validUciMoves, setValidUciMoves] = useState([]);
   const [lastFEN, setLastFEN] = useState(null);
+  const isSpectating = Boolean(gameId && !playerToken);
 
   // Settings State
   const [darkMode, setDarkMode] = useState(true);
@@ -494,6 +504,9 @@ const App = () => {
   const captureSound = useMemo(() => new Audio('https://assets.mixkit.co/active_storage/sfx/2072/2072-preview.mp3'), []);
 
   // --- BACKEND SYNC ---
+  const boardOrientation = playerColor === 'black' ? 'black' : 'white';
+  const mapDisplayToBoard = (r, c) => (boardOrientation === 'black' ? { r: 7 - r, c: 7 - c } : { r, c });
+  const mapBoardToDisplay = (r, c) => (boardOrientation === 'black' ? { r: 7 - r, c: 7 - c } : { r, c });
 
   const formatEndedBy = (endedBy) => {
     switch (endedBy) {
@@ -535,6 +548,13 @@ const App = () => {
       setLastFEN(nextFEN);
     }
     setCheck(Boolean(data.flags?.inCheck));
+    if (data.playerColor) {
+      setPlayerColor(data.playerColor);
+      localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, data.playerColor);
+    } else if (!playerToken) {
+      setPlayerColor(null);
+      localStorage.removeItem(PLAYER_COLOR_STORAGE_KEY);
+    }
 
     if (data.result && data.result !== 'ongoing') {
       setWinner(normalizeWinner(data.winner, data.result));
@@ -552,7 +572,9 @@ const App = () => {
   };
 
   const fetchGame = async () => {
-    const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}`);
+    const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}`, {
+      headers: playerToken ? { 'X-Player-Token': playerToken } : {},
+    });
     applyGameState(payload);
   };
 
@@ -570,7 +592,11 @@ const App = () => {
         if (!cancelled) console.error('Fetch game failed:', e);
         if (!cancelled) {
           localStorage.removeItem(GAME_ID_STORAGE_KEY);
+          localStorage.removeItem(PLAYER_TOKEN_STORAGE_KEY);
+          localStorage.removeItem(PLAYER_COLOR_STORAGE_KEY);
           setGameId(null);
+          setPlayerToken(null);
+          setPlayerColor(null);
           setLastFEN(null);
         }
       } finally {
@@ -585,9 +611,44 @@ const App = () => {
   }, [gameId]);
 
   useEffect(() => {
+    if (!gameId) return;
+    const tokenParam = playerToken ? `?token=${encodeURIComponent(playerToken)}` : '';
+    const streamUrl = `${API_BASE_URL}/api/v1/games/${encodeURIComponent(gameId)}/stream${tokenParam}`;
+    const source = new EventSource(streamUrl);
+
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        applyGameState(payload, { resetSelection: true });
+        if (payload.result && payload.result !== 'ongoing') {
+          source.close();
+        }
+      } catch (e) {
+        console.error('Stream parse failed:', e);
+      }
+    };
+
+    source.onerror = (e) => {
+      console.error('Stream error:', e);
+    };
+
+    return () => {
+      source.close();
+    };
+  }, [gameId, playerToken]);
+
+  useEffect(() => {
     const savedGameId = localStorage.getItem(GAME_ID_STORAGE_KEY);
     if (savedGameId) {
       setGameId(savedGameId);
+    }
+    const savedPlayerToken = localStorage.getItem(PLAYER_TOKEN_STORAGE_KEY);
+    if (savedPlayerToken) {
+      setPlayerToken(savedPlayerToken);
+    }
+    const savedPlayerColor = localStorage.getItem(PLAYER_COLOR_STORAGE_KEY);
+    if (savedPlayerColor) {
+      setPlayerColor(savedPlayerColor);
     }
   }, []);
 
@@ -627,20 +688,26 @@ const App = () => {
   const handleSquareClick = async (r, c) => {
     if (winner) return;
 
+    const boardPos = mapDisplayToBoard(r, c);
+
     if (gameId) {
-      const piece = board[r][c];
+      if (!playerToken) return;
+      if (playerColor && playerColor !== turn) return;
+
+      const piece = board[boardPos.r][boardPos.c];
       if (piece && getPieceColor(piece) === turn) {
-        if (selected?.r === r && selected?.c === c) {
+        if (selected?.r === boardPos.r && selected?.c === boardPos.c) {
           setSelected(null);
           setValidMoves([]);
           setValidUciMoves([]);
         } else {
-          setSelected({ r, c });
+          setSelected({ r: boardPos.r, c: boardPos.c });
           setIsLoading(true);
           try {
-            const from = squareFromCoords(r, c);
+            const from = squareFromCoords(boardPos.r, boardPos.c);
             const payload = await fetchJSON(
-              `/api/v1/games/${encodeURIComponent(gameId)}/legal-moves?from=${encodeURIComponent(from)}`
+              `/api/v1/games/${encodeURIComponent(gameId)}/legal-moves?from=${encodeURIComponent(from)}`,
+              { headers: playerToken ? { 'X-Player-Token': playerToken } : {} }
             );
             const uniqueTargets = new Map();
             payload.moves.forEach((uci) => {
@@ -662,22 +729,23 @@ const App = () => {
         return;
       }
 
-      const move = validMoves.find((m) => m.r === r && m.c === c);
+      const move = validMoves.find((m) => m.r === boardPos.r && m.c === boardPos.c);
       if (selected && move) {
         const from = squareFromCoords(selected.r, selected.c);
-        const to = squareFromCoords(r, c);
+        const to = squareFromCoords(boardPos.r, boardPos.c);
         const movingPiece = board[selected.r][selected.c];
-        const isPromotion = movingPiece?.toLowerCase() === 'p' && (r === 0 || r === 7);
+        const isPromotion = movingPiece?.toLowerCase() === 'p' && (boardPos.r === 0 || boardPos.r === 7);
         const uci = `${from}${to}${isPromotion ? 'q' : ''}`;
 
         if (!validUciMoves.includes(uci)) return;
 
-        const isCapture = board[r][c] !== null;
+        const isCapture = board[boardPos.r][boardPos.c] !== null;
         setIsLoading(true);
         try {
           const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}/moves`, {
             method: 'POST',
             body: JSON.stringify({ uci }),
+            headers: playerToken ? { 'X-Player-Token': playerToken } : {},
           });
           const { board: nextBoard, turn: nextTurn } = parseFEN(payload.fen);
           setBoard(nextBoard);
@@ -714,28 +782,28 @@ const App = () => {
     }
 
     // Selection Logic
-    if (board[r][c] && getPieceColor(board[r][c]) === turn) {
-      if (selected?.r === r && selected?.c === c) {
+    if (board[boardPos.r][boardPos.c] && getPieceColor(board[boardPos.r][boardPos.c]) === turn) {
+      if (selected?.r === boardPos.r && selected?.c === boardPos.c) {
         setSelected(null);
         setValidMoves([]);
       } else {
-        setSelected({ r, c });
-        setValidMoves(getValidMoves(board, r, c));
+        setSelected({ r: boardPos.r, c: boardPos.c });
+        setValidMoves(getValidMoves(board, boardPos.r, boardPos.c));
       }
       return;
     }
 
     // Move Logic
-    const move = validMoves.find((m) => m.r === r && m.c === c);
+    const move = validMoves.find((m) => m.r === boardPos.r && m.c === boardPos.c);
     if (selected && move) {
-      const isCapture = board[r][c] !== null;
+      const isCapture = board[boardPos.r][boardPos.c] !== null;
       const newBoard = board.map((row) => [...row]);
-      newBoard[r][c] = newBoard[selected.r][selected.c];
+      newBoard[boardPos.r][boardPos.c] = newBoard[selected.r][selected.c];
       newBoard[selected.r][selected.c] = null;
 
       // Promotion
-      if (newBoard[r][c].toLowerCase() === 'p' && (r === 0 || r === 7)) {
-        newBoard[r][c] = turn === 'white' ? 'Q' : 'q';
+      if (newBoard[boardPos.r][boardPos.c].toLowerCase() === 'p' && (boardPos.r === 0 || boardPos.r === 7)) {
+        newBoard[boardPos.r][boardPos.c] = turn === 'white' ? 'Q' : 'q';
       }
 
       const nextTurn = turn === 'white' ? 'black' : 'white';
@@ -770,9 +838,34 @@ const App = () => {
     setGameOverReason(null);
     setGameId(null); // Clear ID -> Go Local
     setLastFEN(null);
+    setPlayerToken(null);
+    setPlayerColor(null);
     localStorage.removeItem(GAME_ID_STORAGE_KEY);
+    localStorage.removeItem(PLAYER_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(PLAYER_COLOR_STORAGE_KEY);
     setShowResignConfirm(false);
     setShowGameMenu(false);
+  };
+
+  const exitSpectate = () => {
+    setBoard(INITIAL_BOARD);
+    setTurn('white');
+    setWinner(null);
+    setCheck(false);
+    setSelected(null);
+    setValidMoves([]);
+    setValidUciMoves([]);
+    setGameOverReason(null);
+    setGameId(null);
+    setLastFEN(null);
+    setPlayerToken(null);
+    setPlayerColor(null);
+    localStorage.removeItem(GAME_ID_STORAGE_KEY);
+    localStorage.removeItem(PLAYER_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(PLAYER_COLOR_STORAGE_KEY);
+    setShowResignConfirm(false);
+    setShowSpectatePrompt(false);
+    setShowGameMenu(true);
   };
 
   // 2. Create Online Game
@@ -781,11 +874,15 @@ const App = () => {
     try {
       const payload = await fetchJSON('/api/v1/games', {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ preferredColor }),
       });
       applyGameState(payload, { resetSelection: true });
       setGameId(payload.id);
       localStorage.setItem(GAME_ID_STORAGE_KEY, payload.id);
+      setPlayerToken(payload.playerToken);
+      localStorage.setItem(PLAYER_TOKEN_STORAGE_KEY, payload.playerToken);
+      setPlayerColor(payload.playerColor);
+      localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, payload.playerColor);
       setShowGameMenu(false);
       setShowResignConfirm(false);
     } catch (e) {
@@ -800,14 +897,49 @@ const App = () => {
     if (joinId.length === 0) return;
     setIsLoading(true);
     try {
-      const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(joinId)}`);
+      const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(joinId)}/join`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
       applyGameState(payload, { resetSelection: true });
-      setGameId(payload.id); // This triggers polling
+      setGameId(payload.id);
       localStorage.setItem(GAME_ID_STORAGE_KEY, payload.id);
+      setPlayerToken(payload.playerToken);
+      localStorage.setItem(PLAYER_TOKEN_STORAGE_KEY, payload.playerToken);
+      setPlayerColor(payload.playerColor);
+      localStorage.setItem(PLAYER_COLOR_STORAGE_KEY, payload.playerColor);
       setShowGameMenu(false);
       setShowResignConfirm(false);
+      setShowSpectatePrompt(false);
     } catch (e) {
-      console.error('Error joining game', e);
+      if (e.status === 409) {
+        setShowSpectatePrompt(true);
+        setShowGameMenu(false);
+      } else {
+        console.error('Error joining game', e);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const spectateOnlineGame = async () => {
+    if (joinId.length === 0) return;
+    setIsLoading(true);
+    try {
+      const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(joinId)}`);
+      applyGameState(payload, { resetSelection: true });
+      setGameId(payload.id);
+      localStorage.setItem(GAME_ID_STORAGE_KEY, payload.id);
+      setPlayerToken(null);
+      setPlayerColor(null);
+      localStorage.removeItem(PLAYER_TOKEN_STORAGE_KEY);
+      localStorage.removeItem(PLAYER_COLOR_STORAGE_KEY);
+      setShowGameMenu(false);
+      setShowResignConfirm(false);
+      setShowSpectatePrompt(false);
+    } catch (e) {
+      console.error('Error spectating game', e);
     } finally {
       setIsLoading(false);
     }
@@ -835,6 +967,7 @@ const App = () => {
         const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}/resign`, {
           method: 'POST',
           body: JSON.stringify({ color: turn }),
+          headers: playerToken ? { 'X-Player-Token': playerToken } : {},
         });
         setWinner(normalizeWinner(payload.winner, payload.result));
         setGameOverReason(formatEndedBy(payload.endedBy) || payload.result);
@@ -974,6 +1107,36 @@ const App = () => {
               </div>
             )}
 
+            {/* Spectate Prompt Overlay */}
+            {showSpectatePrompt && (
+              <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center backdrop-blur-md animate-in fade-in p-6 text-center">
+                <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-200 dark:border-slate-700">
+                  <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="w-8 h-8 text-blue-600 dark:text-blue-500" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Room is full</h3>
+                  <p className="text-slate-500 dark:text-slate-400 mb-8">You can still spectate this match.</p>
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={() => {
+                        setShowSpectatePrompt(false);
+                        setShowGameMenu(true);
+                      }}
+                      className="px-6 py-2.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors w-full"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={spectateOnlineGame}
+                      className="px-6 py-2.5 rounded-full bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 w-full"
+                    >
+                      Spectate
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Game Menu (Create/Join/Local) Overlay */}
             {showGameMenu && (
               <div className="absolute inset-0 z-50 bg-slate-900/90 flex flex-col items-center justify-center backdrop-blur-md animate-in fade-in p-6 text-center">
@@ -995,6 +1158,34 @@ const App = () => {
                         <p className="text-xs text-slate-500 dark:text-slate-400">Pass and play on this device</p>
                       </div>
                     </button>
+
+                    <div className="p-4 rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+                      <h3 className="font-bold text-slate-900 dark:text-white text-left mb-2 flex items-center gap-2">
+                        <Trophy className="w-4 h-4" /> Play As
+                      </h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => setPreferredColor('white')}
+                          className={`rounded-lg px-3 py-2 text-sm font-bold border-2 transition-colors ${
+                            preferredColor === 'white'
+                              ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-slate-700 dark:text-blue-300'
+                              : 'border-slate-200 text-slate-600 dark:border-slate-600 dark:text-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          White
+                        </button>
+                        <button
+                          onClick={() => setPreferredColor('black')}
+                          className={`rounded-lg px-3 py-2 text-sm font-bold border-2 transition-colors ${
+                            preferredColor === 'black'
+                              ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-slate-700 dark:text-blue-300'
+                              : 'border-slate-200 text-slate-600 dark:border-slate-600 dark:text-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          Black
+                        </button>
+                      </div>
+                    </div>
 
                     {/* Option 2: Create Online */}
                     <button
@@ -1045,21 +1236,24 @@ const App = () => {
             )}
 
             <div className="w-full h-full grid grid-cols-8 grid-rows-8">
-              {board.map((row, r) =>
-                row.map((piece, c) => {
-                  const isValid = validMoves.some((m) => m.r === r && m.c === c);
-                  const isSelected = selected?.r === r && selected?.c === c;
-                  const isCheckSquare = check && piece && getPieceColor(piece) === turn && piece.toLowerCase() === 'k';
+              {Array.from({ length: 8 }, (_, displayR) =>
+                Array.from({ length: 8 }, (_, displayC) => {
+                  const boardPos = mapDisplayToBoard(displayR, displayC);
+                  const piece = board[boardPos.r][boardPos.c];
+                  const isValid = validMoves.some((m) => m.r === boardPos.r && m.c === boardPos.c);
+                  const isSelected = selected?.r === boardPos.r && selected?.c === boardPos.c;
+                  const isCheckSquare =
+                    check && piece && getPieceColor(piece) === turn && piece.toLowerCase() === 'k';
 
                   return (
                     <div
-                      key={`${r}-${c}`}
-                      onClick={() => handleSquareClick(r, c)}
-                      style={{ backgroundColor: getSquareColor(r, c) }}
+                      key={`${displayR}-${displayC}`}
+                      onClick={() => handleSquareClick(displayR, displayC)}
+                      style={{ backgroundColor: getSquareColor(boardPos.r, boardPos.c) }}
                       className="relative flex items-center justify-center cursor-pointer"
                     >
                       {/* Rank/File Indicators */}
-                      {c === 0 && r === 7 && (
+                      {displayC === 0 && displayR === 7 && (
                         <span
                           className={`absolute bottom-0.5 left-1 text-[10px] font-bold ${
                             getPieceColor(piece) === 'white' ? 'text-slate-800' : 'opacity-60'
@@ -1107,6 +1301,11 @@ const App = () => {
                 }`}
               ></div>
               <span className="font-semibold capitalize">{turn}'s Turn</span>
+              {isSpectating && (
+                <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide bg-amber-200 text-amber-900 border border-amber-300 shadow-sm">
+                  <Eye className="w-3.5 h-3.5" /> Spectating
+                </span>
+              )}
               {check && !winner && <span className="text-red-500 font-bold ml-2 animate-pulse">CHECK!</span>}
             </div>
 
@@ -1127,9 +1326,21 @@ const App = () => {
               </div>
             )}
 
-            <button onClick={onNewGameClick} className="text-sm font-medium hover:text-red-500 flex items-center gap-1 transition-colors">
-              <Flag className="w-4 h-4" /> New Game
-            </button>
+            {isSpectating ? (
+              <button
+                onClick={exitSpectate}
+                className="text-sm font-semibold px-3 py-1.5 rounded-full bg-blue-500/90 dark:bg-blue-500/80 text-white flex items-center gap-1 transition-all hover:bg-blue-500 shadow-[0_2px_0_0_rgba(255,255,255,0.2)_inset,0_6px_14px_rgba(15,23,42,0.25)] border border-blue-300/60 hover:border-blue-200/80"
+              >
+                <ArrowRight className="w-4 h-4" /> Exit
+              </button>
+            ) : (
+              <button
+                onClick={onNewGameClick}
+                className="text-sm font-semibold px-3 py-1.5 rounded-full bg-red-500/90 dark:bg-red-500/80 text-white flex items-center gap-1 transition-all hover:bg-red-500 shadow-[0_2px_0_0_rgba(255,255,255,0.2)_inset,0_6px_14px_rgba(15,23,42,0.25)] border border-red-300/60 hover:border-red-200/80"
+              >
+                <Flag className="w-4 h-4" /> New Game
+              </button>
+            )}
           </div>
         </div>
 

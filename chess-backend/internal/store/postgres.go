@@ -36,8 +36,9 @@ func (s *PostgresStore) CreateGame(ctx context.Context, game *Game) error {
 	query := `
 		INSERT INTO games (
 			id, start_fen, current_fen, result, winner, ended_by,
-			pending_draw_offer_by, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			pending_draw_offer_by, player_white_token, player_black_token,
+			player_white_joined_at, player_black_joined_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 	_, err := s.pool.Exec(
 		ctx,
@@ -49,6 +50,10 @@ func (s *PostgresStore) CreateGame(ctx context.Context, game *Game) error {
 		nullIfEmpty(game.Winner),
 		nullIfEmpty(game.EndedBy),
 		colorToNullableString(game.PendingDrawOfferBy),
+		nullIfEmpty(game.PlayerWhiteToken),
+		nullIfEmpty(game.PlayerBlackToken),
+		nullIfNilTime(game.PlayerWhiteJoinedAt),
+		nullIfNilTime(game.PlayerBlackJoinedAt),
 		game.CreatedAt,
 		game.UpdatedAt,
 	)
@@ -58,20 +63,25 @@ func (s *PostgresStore) CreateGame(ctx context.Context, game *Game) error {
 func (s *PostgresStore) GetGame(ctx context.Context, id string) (*Game, error) {
 	query := `
 		SELECT id, start_fen, current_fen, result, winner, ended_by,
-		       pending_draw_offer_by, created_at, updated_at
+		       pending_draw_offer_by, player_white_token, player_black_token,
+		       player_white_joined_at, player_black_joined_at, created_at, updated_at
 		FROM games
 		WHERE id = $1
 	`
 	var (
-		gameID   string
-		startFEN string
-		fen      string
-		result   string
-		winner   sql.NullString
-		endedBy  sql.NullString
-		pending  sql.NullString
-		created  time.Time
-		updated  time.Time
+		gameID      string
+		startFEN    string
+		fen         string
+		result      string
+		winner      sql.NullString
+		endedBy     sql.NullString
+		pending     sql.NullString
+		whiteToken  sql.NullString
+		blackToken  sql.NullString
+		whiteJoined sql.NullTime
+		blackJoined sql.NullTime
+		created     time.Time
+		updated     time.Time
 	)
 
 	err := s.pool.QueryRow(ctx, query, id).Scan(
@@ -82,6 +92,10 @@ func (s *PostgresStore) GetGame(ctx context.Context, id string) (*Game, error) {
 		&winner,
 		&endedBy,
 		&pending,
+		&whiteToken,
+		&blackToken,
+		&whiteJoined,
+		&blackJoined,
 		&created,
 		&updated,
 	)
@@ -104,6 +118,20 @@ func (s *PostgresStore) GetGame(ctx context.Context, id string) (*Game, error) {
 		Result:    result,
 		CreatedAt: created,
 		UpdatedAt: updated,
+	}
+	if whiteToken.Valid {
+		game.PlayerWhiteToken = whiteToken.String
+	}
+	if blackToken.Valid {
+		game.PlayerBlackToken = blackToken.String
+	}
+	if whiteJoined.Valid {
+		ts := whiteJoined.Time
+		game.PlayerWhiteJoinedAt = &ts
+	}
+	if blackJoined.Valid {
+		ts := blackJoined.Time
+		game.PlayerBlackJoinedAt = &ts
 	}
 	if winner.Valid {
 		game.Winner = winner.String
@@ -129,7 +157,11 @@ func (s *PostgresStore) UpdateGame(ctx context.Context, game *Game) error {
 		    winner = $4,
 		    ended_by = $5,
 		    pending_draw_offer_by = $6,
-		    updated_at = $7
+		    player_white_token = $7,
+		    player_black_token = $8,
+		    player_white_joined_at = $9,
+		    player_black_joined_at = $10,
+		    updated_at = $11
 		WHERE id = $1
 	`
 	ct, err := s.pool.Exec(
@@ -141,6 +173,10 @@ func (s *PostgresStore) UpdateGame(ctx context.Context, game *Game) error {
 		nullIfEmpty(game.Winner),
 		nullIfEmpty(game.EndedBy),
 		colorToNullableString(game.PendingDrawOfferBy),
+		nullIfEmpty(game.PlayerWhiteToken),
+		nullIfEmpty(game.PlayerBlackToken),
+		nullIfNilTime(game.PlayerWhiteJoinedAt),
+		nullIfNilTime(game.PlayerBlackJoinedAt),
 		game.UpdatedAt,
 	)
 	if err != nil {
@@ -161,7 +197,11 @@ func (s *PostgresStore) UpdateGameWithMove(ctx context.Context, game *Game, move
 			    winner = $4,
 			    ended_by = $5,
 			    pending_draw_offer_by = $6,
-			    updated_at = $7
+			    player_white_token = $7,
+			    player_black_token = $8,
+			    player_white_joined_at = $9,
+			    player_black_joined_at = $10,
+			    updated_at = $11
 			WHERE id = $1
 			RETURNING id
 		),
@@ -177,8 +217,8 @@ func (s *PostgresStore) UpdateGameWithMove(ctx context.Context, game *Game, move
 				next_ply.ply,
 				(next_ply.ply + 1) / 2,
 				CASE WHEN next_ply.ply % 2 = 1 THEN 'w' ELSE 'b' END,
-				$8,
-				$7
+				$12,
+				$11
 			FROM next_ply
 			RETURNING 1
 		)
@@ -193,6 +233,10 @@ func (s *PostgresStore) UpdateGameWithMove(ctx context.Context, game *Game, move
 		nullIfEmpty(game.Winner),
 		nullIfEmpty(game.EndedBy),
 		colorToNullableString(game.PendingDrawOfferBy),
+		nullIfEmpty(game.PlayerWhiteToken),
+		nullIfEmpty(game.PlayerBlackToken),
+		nullIfNilTime(game.PlayerWhiteJoinedAt),
+		nullIfNilTime(game.PlayerBlackJoinedAt),
 		game.UpdatedAt,
 		move,
 	).Scan(new(int))
@@ -245,6 +289,13 @@ func nullIfEmpty(value string) interface{} {
 		return nil
 	}
 	return value
+}
+
+func nullIfNilTime(value *time.Time) interface{} {
+	if value == nil {
+		return nil
+	}
+	return *value
 }
 
 func normalizeResult(result string) string {

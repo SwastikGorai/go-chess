@@ -11,14 +11,19 @@ import (
 	"chess-backend/internal/store"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type Handlers struct {
 	store store.GameStore
+	hub   *StreamHub
 }
 
 func NewHandlers(store store.GameStore) *Handlers {
-	return &Handlers{store: store}
+	return &Handlers{
+		store: store,
+		hub:   NewStreamHub(),
+	}
 }
 
 func (h *Handlers) CreateGame(c *gin.Context) {
@@ -40,6 +45,17 @@ func (h *Handlers) CreateGame(c *gin.Context) {
 		}
 	}
 
+	var creatorColor chess.Color
+	if strings.TrimSpace(req.PreferredColor) == "" {
+		creatorColor = chess.White
+	} else {
+		creatorColor, err = parseColor(req.PreferredColor)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	id, err := store.NewGameID()
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "failed to create game id")
@@ -47,6 +63,7 @@ func (h *Handlers) CreateGame(c *gin.Context) {
 	}
 
 	now := time.Now().UTC()
+	playerToken := newPlayerToken()
 	game := &store.Game{
 		ID:        id,
 		Board:     board,
@@ -55,6 +72,13 @@ func (h *Handlers) CreateGame(c *gin.Context) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+	if creatorColor == chess.White {
+		game.PlayerWhiteToken = playerToken
+		game.PlayerWhiteJoinedAt = &now
+	} else {
+		game.PlayerBlackToken = playerToken
+		game.PlayerBlackJoinedAt = &now
+	}
 
 	status := computeStatus(game)
 	game.Result = status.Result
@@ -62,15 +86,33 @@ func (h *Handlers) CreateGame(c *gin.Context) {
 	game.EndedBy = status.EndedBy
 
 	if err := h.store.CreateGame(c.Request.Context(), game); err != nil {
-		writeError(c, http.StatusInternalServerError, "failed to store game")
+		writeError(c, http.StatusInternalServerError, "failed to store game: "+err.Error())
 		return
 	}
-	response := buildGameResponse(game)
+	response := buildGameResponseForToken(game, playerToken)
+
+	c.JSON(http.StatusOK, PlayerGameResponse{
+		GameResponse:  response,
+		PlayerToken:   playerToken,
+		OpponentColor: creatorColor.Opposite().String(),
+	})
+}
+
+func (h *Handlers) GetGame(c *gin.Context) {
+	id := c.Param("id")
+	token := playerTokenFromRequest(c)
+
+	game, err := h.store.GetGame(c.Request.Context(), id)
+	if err != nil {
+		handleStoreError(c, err)
+		return
+	}
+	response := buildGameResponseForToken(game, token)
 
 	c.JSON(http.StatusOK, response)
 }
 
-func (h *Handlers) GetGame(c *gin.Context) {
+func (h *Handlers) JoinGame(c *gin.Context) {
 	id := c.Param("id")
 
 	game, err := h.store.GetGame(c.Request.Context(), id)
@@ -78,9 +120,39 @@ func (h *Handlers) GetGame(c *gin.Context) {
 		handleStoreError(c, err)
 		return
 	}
-	response := buildGameResponse(game)
 
-	c.JSON(http.StatusOK, response)
+	if game.PlayerWhiteToken != "" && game.PlayerBlackToken != "" {
+		writeError(c, http.StatusConflict, "game full")
+		return
+	}
+
+	now := time.Now().UTC()
+	playerToken := newPlayerToken()
+	var playerColor chess.Color
+	if game.PlayerWhiteToken == "" {
+		game.PlayerWhiteToken = playerToken
+		game.PlayerWhiteJoinedAt = &now
+		playerColor = chess.White
+	} else {
+		game.PlayerBlackToken = playerToken
+		game.PlayerBlackJoinedAt = &now
+		playerColor = chess.Black
+	}
+	game.UpdatedAt = now
+
+	if err := h.store.UpdateGame(c.Request.Context(), game); err != nil {
+		handleStoreError(c, err)
+		return
+	}
+
+	response := buildGameResponseForToken(game, playerToken)
+	h.broadcastGame(game)
+
+	c.JSON(http.StatusOK, PlayerGameResponse{
+		GameResponse:  response,
+		PlayerToken:   playerToken,
+		OpponentColor: playerColor.Opposite().String(),
+	})
 }
 
 func (h *Handlers) LegalMoves(c *gin.Context) {
@@ -117,6 +189,7 @@ func (h *Handlers) LegalMoves(c *gin.Context) {
 
 func (h *Handlers) MakeMove(c *gin.Context) {
 	id := c.Param("id")
+	token := playerTokenFromRequest(c)
 
 	var req MoveRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -133,6 +206,14 @@ func (h *Handlers) MakeMove(c *gin.Context) {
 	game, err := h.store.GetGame(c.Request.Context(), id)
 	if err != nil {
 		handleStoreError(c, err)
+		return
+	}
+	color, ok := requirePlayerToken(c, game, token)
+	if !ok {
+		return
+	}
+	if game.Board.Turn() != color {
+		writeError(c, http.StatusConflict, "not your turn")
 		return
 	}
 
@@ -160,7 +241,8 @@ func (h *Handlers) MakeMove(c *gin.Context) {
 		handleStoreError(c, err)
 		return
 	}
-	response := buildMoveResponse(game)
+	response := buildMoveResponseForToken(game, token)
+	h.broadcastGame(game)
 
 	c.JSON(http.StatusOK, response)
 }
@@ -200,22 +282,21 @@ func (h *Handlers) History(c *gin.Context) {
 
 func (h *Handlers) Resign(c *gin.Context) {
 	id := c.Param("id")
+	token := playerTokenFromRequest(c)
 
 	var req ResignRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil && !isEmptyBody(err) {
 		writeError(c, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	color, err := parseColor(req.Color)
-	if err != nil {
-		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	game, err := h.store.GetGame(c.Request.Context(), id)
 	if err != nil {
 		handleStoreError(c, err)
+		return
+	}
+	color, ok := requirePlayerToken(c, game, token)
+	if !ok {
 		return
 	}
 
@@ -236,6 +317,7 @@ func (h *Handlers) Resign(c *gin.Context) {
 		handleStoreError(c, err)
 		return
 	}
+	h.broadcastGame(game)
 
 	c.JSON(http.StatusOK, ResignResponse{
 		Result:  status.Result,
@@ -247,22 +329,25 @@ func (h *Handlers) Resign(c *gin.Context) {
 
 func (h *Handlers) OfferDraw(c *gin.Context) {
 	id := c.Param("id")
+	token := playerTokenFromRequest(c)
 
 	var req OfferDrawRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil && !isEmptyBody(err) {
 		writeError(c, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	color, err := parseColor(req.Color)
-	if err != nil {
-		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	game, err := h.store.GetGame(c.Request.Context(), id)
 	if err != nil {
 		handleStoreError(c, err)
+		return
+	}
+	color, ok := requirePlayerToken(c, game, token)
+	if !ok {
+		return
+	}
+	if game.Board.Turn() != color {
+		writeError(c, http.StatusConflict, "not your turn")
 		return
 	}
 
@@ -281,28 +366,32 @@ func (h *Handlers) OfferDraw(c *gin.Context) {
 		handleStoreError(c, err)
 		return
 	}
+	h.broadcastGame(game)
 
 	c.JSON(http.StatusOK, OfferDrawResponse{Offer: "pending"})
 }
 
 func (h *Handlers) AcceptDraw(c *gin.Context) {
 	id := c.Param("id")
+	token := playerTokenFromRequest(c)
 
 	var req AcceptDrawRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil && !isEmptyBody(err) {
 		writeError(c, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	color, err := parseColor(req.Color)
-	if err != nil {
-		writeError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	game, err := h.store.GetGame(c.Request.Context(), id)
 	if err != nil {
 		handleStoreError(c, err)
+		return
+	}
+	color, ok := requirePlayerToken(c, game, token)
+	if !ok {
+		return
+	}
+	if game.Board.Turn() != color {
+		writeError(c, http.StatusConflict, "not your turn")
 		return
 	}
 
@@ -332,6 +421,7 @@ func (h *Handlers) AcceptDraw(c *gin.Context) {
 		handleStoreError(c, err)
 		return
 	}
+	h.broadcastGame(game)
 
 	c.JSON(http.StatusOK, AcceptDrawResponse{
 		Result:  status.Result,
@@ -386,6 +476,58 @@ func buildMoveResponse(game *store.Game) MoveResponse {
 	}
 }
 
+func buildGameResponseForToken(game *store.Game, token string) GameResponse {
+	response := buildGameResponse(game)
+	if color, ok := playerColorForToken(game, token); ok {
+		response.PlayerColor = color.String()
+		response.BoardOrientation = color.String()
+	}
+	return response
+}
+
+func buildMoveResponseForToken(game *store.Game, token string) MoveResponse {
+	response := buildMoveResponse(game)
+	if color, ok := playerColorForToken(game, token); ok {
+		response.PlayerColor = color.String()
+		response.BoardOrientation = color.String()
+	}
+	return response
+}
+
+func playerColorForToken(game *store.Game, token string) (chess.Color, bool) {
+	if token == "" {
+		return 0, false
+	}
+	if token == game.PlayerWhiteToken {
+		return chess.White, true
+	}
+	if token == game.PlayerBlackToken {
+		return chess.Black, true
+	}
+	return 0, false
+}
+
+func requirePlayerToken(c *gin.Context, game *store.Game, token string) (chess.Color, bool) {
+	color, ok := playerColorForToken(game, token)
+	if !ok {
+		writeError(c, http.StatusForbidden, "invalid player token")
+		return 0, false
+	}
+	return color, true
+}
+
+func playerTokenFromRequest(c *gin.Context) string {
+	token := strings.TrimSpace(c.GetHeader("X-Player-Token"))
+	if token != "" {
+		return token
+	}
+	return strings.TrimSpace(c.Query("token"))
+}
+
+func newPlayerToken() string {
+	return uuid.NewString()
+}
+
 func writeError(c *gin.Context, code int, message string) {
 	c.JSON(code, ErrorResponse{Error: message})
 }
@@ -400,4 +542,11 @@ func handleStoreError(c *gin.Context, err error) {
 		return
 	}
 	writeError(c, http.StatusInternalServerError, "storage error")
+}
+
+func (h *Handlers) broadcastGame(game *store.Game) {
+	if h.hub == nil {
+		return
+	}
+	h.hub.BroadcastGame(game, buildGameResponseForToken)
 }
