@@ -8,16 +8,20 @@ import (
 )
 
 type Game struct {
-	ID                 string
-	Board              *chess.Board
-	StartFEN           string
-	Moves              []string
-	PendingDrawOfferBy *chess.Color
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	Result             string
-	Winner             string
-	EndedBy            string
+	ID                  string
+	Board               *chess.Board
+	StartFEN            string
+	Moves               []string
+	PendingDrawOfferBy  *chess.Color
+	PlayerWhiteToken    string
+	PlayerBlackToken    string
+	PlayerWhiteJoinedAt *time.Time
+	PlayerBlackJoinedAt *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	Result              string
+	Winner              string
+	EndedBy             string
 }
 
 func NewGameID() (string, error) {

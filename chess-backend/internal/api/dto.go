@@ -3,7 +3,8 @@ package api
 import "time"
 
 type CreateGameRequest struct {
-	Fen string `json:"fen"`
+	Fen            string `json:"fen"`
+	PreferredColor string `json:"preferredColor"`
 }
 
 type MoveRequest struct {
@@ -38,27 +39,31 @@ type Meta struct {
 }
 
 type GameResponse struct {
-	ID       string `json:"id"`
-	FEN      string `json:"fen"`
-	Turn     string `json:"turn"`
-	Result   string `json:"result"`
-	Winner   string `json:"winner,omitempty"`
-	EndedBy  string `json:"endedBy,omitempty"`
-	Flags    Flags  `json:"flags"`
-	Halfmove int    `json:"halfmove"`
-	Fullmove int    `json:"fullmove"`
-	Meta     Meta   `json:"meta"`
+	ID               string `json:"id"`
+	FEN              string `json:"fen"`
+	Turn             string `json:"turn"`
+	Result           string `json:"result"`
+	Winner           string `json:"winner,omitempty"`
+	EndedBy          string `json:"endedBy,omitempty"`
+	PlayerColor      string `json:"playerColor,omitempty"`
+	BoardOrientation string `json:"boardOrientation,omitempty"`
+	Flags            Flags  `json:"flags"`
+	Halfmove         int    `json:"halfmove"`
+	Fullmove         int    `json:"fullmove"`
+	Meta             Meta   `json:"meta"`
 }
 
 type MoveResponse struct {
-	FEN      string `json:"fen"`
-	Turn     string `json:"turn"`
-	Result   string `json:"result"`
-	Winner   string `json:"winner,omitempty"`
-	EndedBy  string `json:"endedBy,omitempty"`
-	Flags    Flags  `json:"flags"`
-	Halfmove int    `json:"halfmove"`
-	Fullmove int    `json:"fullmove"`
+	FEN              string `json:"fen"`
+	Turn             string `json:"turn"`
+	Result           string `json:"result"`
+	Winner           string `json:"winner,omitempty"`
+	EndedBy          string `json:"endedBy,omitempty"`
+	PlayerColor      string `json:"playerColor,omitempty"`
+	BoardOrientation string `json:"boardOrientation,omitempty"`
+	Flags            Flags  `json:"flags"`
+	Halfmove         int    `json:"halfmove"`
+	Fullmove         int    `json:"fullmove"`
 }
 
 type StatusResponse struct {
@@ -97,4 +102,10 @@ type AcceptDrawResponse struct {
 
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+type PlayerGameResponse struct {
+	GameResponse
+	PlayerToken   string `json:"playerToken"`
+	OpponentColor string `json:"opponentColor"`
 }

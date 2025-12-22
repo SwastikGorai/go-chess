@@ -94,6 +94,14 @@ func cloneGame(game *Game) *Game {
 		color := *game.PendingDrawOfferBy
 		clone.PendingDrawOfferBy = &color
 	}
+	if game.PlayerWhiteJoinedAt != nil {
+		ts := *game.PlayerWhiteJoinedAt
+		clone.PlayerWhiteJoinedAt = &ts
+	}
+	if game.PlayerBlackJoinedAt != nil {
+		ts := *game.PlayerBlackJoinedAt
+		clone.PlayerBlackJoinedAt = &ts
+	}
 	if game.Moves != nil {
 		clone.Moves = append([]string(nil), game.Moves...)
 	}
