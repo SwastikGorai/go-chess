@@ -52,8 +52,16 @@ The API listens on `http://localhost:8080` by default.
 
 Base path: `/api/v1`
 
-- `POST /games` - create a new game (optional body: `{ "fen": "..." }`)
+- `POST /games` - create a new game (optional body: `{ "fen": "...", "preferredColor": "white" | "black" }`)
+  - Returns `PlayerGameResponse` with `playerToken` and `opponentColor`
 - `GET /games/:id` - get game state
+- `POST /games/:id/join` - join as the second player
+  - Returns `PlayerGameResponse` with `playerToken` and `opponentColor`
+  - Returns `409 Conflict` if game is full
+- `GET /games/:id/stream` - SSE stream for real-time game updates
+  - Accepts player token via `X-Player-Token` header or `token` query parameter
+  - Sends current game state immediately on connect
+  - Broadcasts updates on moves, joins, and game state changes
 - `GET /games/:id/legal-moves?from=e2` - list legal UCI moves (optionally filter by from-square)
 - `POST /games/:id/moves` - make a move (`{ "uci": "e2e4" }`)
 - `GET /games/:id/status` - get status flags/result
@@ -61,6 +69,13 @@ Base path: `/api/v1`
 - `POST /games/:id/resign` - resign (`{ "color": "white" | "black" }`)
 - `POST /games/:id/offer-draw` - offer a draw (`{ "color": "white" | "black" }`)
 - `POST /games/:id/accept-draw` - accept a draw (`{ "color": "white" | "black" }`)
+
+### Authentication
+
+Two player games use player tokens for authentication:
+- Tokens are generated when creating or joining a game
+- Include the token via `X-Player-Token` header or `token` query parameter
+- Moves are validated to ensure the correct player is making them
 
 Health check:
 
@@ -74,11 +89,32 @@ Create a game:
 curl -s -X POST http://localhost:8080/api/v1/games
 ```
 
+Create a game with preferred color:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/games \
+  -H 'Content-Type: application/json' \
+  -d '{"preferredColor": "black"}'
+```
+
+Join a game:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/games/<game-id>/join
+```
+
+Stream game updates (SSE):
+
+```bash
+curl -N http://localhost:8080/api/v1/games/<game-id>/stream?token=<player-token>
+```
+
 Make a move:
 
 ```bash
 curl -s -X POST http://localhost:8080/api/v1/games/<game-id>/moves \
   -H 'Content-Type: application/json' \
+  -H 'X-Player-Token: <player-token>' \
   -d '{"uci":"e2e4"}'
 ```
 
