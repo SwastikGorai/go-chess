@@ -133,7 +133,7 @@ func (b *Board) MakeMove(move Move) error {
 		}
 	}
 
-	isCastle := piece.Type == King && (move.To.File()-move.From.File()) == 2 && move.From.Rank() == move.To.Rank()
+	isCastle := piece.Type == King && abs(move.To.File()-move.From.File()) == 2 && move.From.Rank() == move.To.Rank()
 
 	b.squares[move.To] = b.squares[move.From]
 	b.ClearSquare(move.From)

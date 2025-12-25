@@ -28,6 +28,34 @@ func TestCastling_Kingside_MovesRook(t *testing.T) {
 	}
 }
 
+func TestCastling_Queenside_MovesRook(t *testing.T) {
+	b := newEmptyBoard(White)
+	b.castling = CastlingRights{WhiteKingside: true, WhiteQueenside: true, BlackKingside: true, BlackQueenside: true}
+
+	b.setPiece(E1, NewPiece(King, White))
+	b.setPiece(A1, NewPiece(Rook, White))
+
+	if err := b.MakeMove(NewMove(E1, C1)); err != nil {
+		t.Fatalf("expected O-O-O to be legal, got %v", err)
+	}
+
+	k := b.PieceAt(C1)
+	if k == nil || k.Type != King || k.Color != White {
+		t.Fatalf("expected white king on C1, got %v", k)
+	}
+
+	// rook should be on D1, and A1 should be empty
+	r := b.PieceAt(D1)
+	if r == nil || r.Type != Rook || r.Color != White {
+		t.Fatalf("expected white rook on D1, got %v", r)
+	}
+	if b.PieceAt(A1) != nil {
+		t.Fatalf("expected A1 to be empty after castling")
+	}
+}
+
+
+
 func TestCastling_Illegal_ThroughCheck(t *testing.T) {
 	b := newEmptyBoard(White)
 	b.castling = CastlingRights{WhiteKingside: true, WhiteQueenside: true, BlackKingside: true, BlackQueenside: true}
