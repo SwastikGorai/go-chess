@@ -18,6 +18,7 @@ import {
   Play,
   ArrowRight,
 } from 'lucide-react';
+import './App.css';
 
 // --- CHESS LOGIC & HELPERS ---
 
@@ -1026,52 +1027,45 @@ const App = () => {
   };
 
   return (
-    <div className={`min-h-screen w-full transition-colors duration-500 font-sans ${darkMode ? 'dark bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
-      <div className="max-w-6xl mx-auto p-4 md:p-8 flex flex-col md:flex-row gap-8 items-start justify-center">
+    <div className={`nb-app min-h-screen w-full transition-colors duration-500 ${darkMode ? 'dark' : ''}`}>
+      <div className="nb-shell max-w-6xl mx-auto p-4 md:p-8 flex flex-col md:flex-row gap-8 items-start justify-center">
         {/* --- LEFT PANEL --- */}
         <div className="flex-1 w-full max-w-[600px] flex flex-col gap-4">
           <div className="flex justify-between items-center mb-2">
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <h1 className="nb-title text-3xl md:text-4xl flex items-center gap-3">
               <Ghost className="w-6 h-6" /> Chess
             </h1>
 
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className={`
-                w-10 h-10 flex items-center justify-center rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500
-                ${
-                  showSettings
-                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 rotate-90'
-                    : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700'
-                }
-              `}
+              className={`nb-icon-button ${showSettings ? 'is-active' : ''}`}
             >
               <Settings className="w-5 h-5" />
             </button>
           </div>
 
           <div
-            className={`relative aspect-square w-full rounded-lg overflow-hidden shadow-2xl border-[12px] transition-colors duration-300 ${BOARD_THEMES[boardTheme].border}`}
+            className={`relative aspect-square w-full nb-board-frame transition-colors duration-300 ${BOARD_THEMES[boardTheme].border}`}
           >
             {/* Loading Overlay */}
             {isLoading && (
-              <div className="absolute inset-0 z-50 bg-black/50 flex items-center justify-center">
+              <div className="nb-overlay absolute inset-0 z-50 flex items-center justify-center">
                 <RefreshCw className="w-10 h-10 text-white animate-spin" />
               </div>
             )}
 
             {/* Game Over Overlay */}
             {winner && !showGameMenu && (
-              <div className="absolute inset-0 z-40 bg-black/60 flex flex-col items-center justify-center backdrop-blur-sm animate-in fade-in">
-                <Trophy className="w-16 h-16 text-yellow-400 mb-4 animate-bounce" />
-                <h2 className="text-4xl font-bold text-white mb-1">
+              <div className="nb-overlay nb-overlay--dark absolute inset-0 z-40 flex flex-col items-center justify-center animate-in fade-in">
+                <Trophy className="w-16 h-16 text-yellow-300 mb-4 animate-bounce" />
+                <h2 className="nb-title text-4xl text-white mb-1">
                   {winner === 'Draw' ? 'Draw' : `${winner} Wins!`}
                 </h2>
                 {gameOverReason && <p className="text-lg text-white/80 font-medium mb-4">{gameOverReason}</p>}
 
                 <button
                   onClick={() => setShowGameMenu(true)}
-                  className="mt-6 px-8 py-3 bg-white text-slate-900 font-bold rounded-full hover:scale-105 hover:bg-slate-50 transition-all flex items-center gap-2 shadow-xl"
+                  className="nb-button nb-button--primary mt-6 flex items-center gap-2"
                 >
                   Next <ArrowRight className="w-5 h-5" />
                 </button>
@@ -1080,25 +1074,23 @@ const App = () => {
 
             {/* Resign Confirmation Overlay */}
             {showResignConfirm && !winner && (
-              <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center backdrop-blur-md animate-in fade-in p-6 text-center">
-                <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-200 dark:border-slate-700">
-                  <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-500" />
+              <div className="nb-overlay nb-overlay--dark absolute inset-0 z-50 flex flex-col items-center justify-center animate-in fade-in p-6 text-center">
+                <div className="nb-modal p-8 max-w-sm w-full mx-4">
+                  <div className="nb-icon-badge nb-icon-badge--danger mx-auto mb-4">
+                    <AlertTriangle className="w-8 h-8" />
                   </div>
-                  <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Resign Game?</h3>
-                  <p className="text-slate-500 dark:text-slate-400 mb-8">
-                    To start a new game or join another, you must resign the current match.
-                  </p>
+                  <h3 className="nb-title text-2xl mb-2">Resign Game?</h3>
+                  <p className="nb-muted mb-8">To start a new game or join another, you must resign the current match.</p>
                   <div className="flex gap-3 justify-center">
                     <button
                       onClick={() => setShowResignConfirm(false)}
-                      className="px-6 py-2.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors w-full"
+                      className="nb-button nb-button--neutral w-full"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={confirmResignation}
-                      className="px-6 py-2.5 rounded-full bg-red-600 text-white font-bold hover:bg-red-700 transition-colors flex items-center justify-center gap-2 w-full"
+                      className="nb-button nb-button--danger w-full"
                     >
                       Resign
                     </button>
@@ -1109,26 +1101,26 @@ const App = () => {
 
             {/* Spectate Prompt Overlay */}
             {showSpectatePrompt && (
-              <div className="absolute inset-0 z-50 bg-black/70 flex flex-col items-center justify-center backdrop-blur-md animate-in fade-in p-6 text-center">
-                <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-sm w-full mx-4 border border-slate-200 dark:border-slate-700">
-                  <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Users className="w-8 h-8 text-blue-600 dark:text-blue-500" />
+              <div className="nb-overlay nb-overlay--dark absolute inset-0 z-50 flex flex-col items-center justify-center animate-in fade-in p-6 text-center">
+                <div className="nb-modal p-8 max-w-sm w-full mx-4">
+                  <div className="nb-icon-badge nb-icon-badge--primary mx-auto mb-4">
+                    <Users className="w-8 h-8" />
                   </div>
-                  <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Room is full</h3>
-                  <p className="text-slate-500 dark:text-slate-400 mb-8">You can still spectate this match.</p>
+                  <h3 className="nb-title text-2xl mb-2">Room is full</h3>
+                  <p className="nb-muted mb-8">You can still spectate this match.</p>
                   <div className="flex gap-3 justify-center">
                     <button
                       onClick={() => {
                         setShowSpectatePrompt(false);
                         setShowGameMenu(true);
                       }}
-                      className="px-6 py-2.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors w-full"
+                      className="nb-button nb-button--neutral w-full"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={spectateOnlineGame}
-                      className="px-6 py-2.5 rounded-full bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 w-full"
+                      className="nb-button nb-button--primary w-full"
                     >
                       Spectate
                     </button>
@@ -1139,48 +1131,37 @@ const App = () => {
 
             {/* Game Menu (Create/Join/Local) Overlay */}
             {showGameMenu && (
-              <div className="absolute inset-0 z-50 bg-slate-900/90 flex flex-col items-center justify-center backdrop-blur-md animate-in fade-in p-6 text-center">
-                <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl shadow-2xl max-w-md w-full border border-slate-200 dark:border-slate-700">
-                  <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">New Game</h2>
-                  <p className="text-slate-500 dark:text-slate-400 mb-8">Choose how you want to play</p>
+              <div className="nb-overlay nb-overlay--dark absolute inset-0 z-50 flex flex-col items-center justify-center animate-in fade-in p-6 text-center">
+                <div className="nb-modal p-6 md:p-8 max-w-md w-full">
+                  <h2 className="nb-title text-3xl mb-2">New Game</h2>
+                  <p className="nb-muted mb-8">Choose how you want to play</p>
 
                   <div className="space-y-3">
                     {/* Option 1: Play Local */}
-                    <button
-                      onClick={resetLocalGame}
-                      className="w-full flex items-center p-4 rounded-xl border-2 border-slate-100 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-slate-700 transition-all group"
-                    >
-                      <div className="p-3 bg-blue-100 dark:bg-blue-900/50 rounded-full text-blue-600 dark:text-blue-400 mr-4 group-hover:scale-110 transition-transform">
+                    <button onClick={resetLocalGame} className="nb-option nb-option--primary w-full flex items-center group">
+                      <div className="nb-icon-badge nb-icon-badge--primary mr-4">
                         <Users className="w-6 h-6" />
                       </div>
                       <div className="text-left">
-                        <h3 className="font-bold text-slate-900 dark:text-white">Play Local</h3>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Pass and play on this device</p>
+                        <h3 className="nb-option-title">Play Local</h3>
+                        <p className="nb-muted text-xs">Pass and play on this device</p>
                       </div>
                     </button>
 
-                    <div className="p-4 rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                      <h3 className="font-bold text-slate-900 dark:text-white text-left mb-2 flex items-center gap-2">
+                    <div className="nb-card nb-card--soft p-4">
+                      <h3 className="nb-label text-left mb-2 flex items-center gap-2">
                         <Trophy className="w-4 h-4" /> Play As
                       </h3>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           onClick={() => setPreferredColor('white')}
-                          className={`rounded-lg px-3 py-2 text-sm font-bold border-2 transition-colors ${
-                            preferredColor === 'white'
-                              ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-slate-700 dark:text-blue-300'
-                              : 'border-slate-200 text-slate-600 dark:border-slate-600 dark:text-slate-200 hover:border-slate-300'
-                          }`}
+                          className={`nb-toggle ${preferredColor === 'white' ? 'is-active' : ''}`}
                         >
                           White
                         </button>
                         <button
                           onClick={() => setPreferredColor('black')}
-                          className={`rounded-lg px-3 py-2 text-sm font-bold border-2 transition-colors ${
-                            preferredColor === 'black'
-                              ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-slate-700 dark:text-blue-300'
-                              : 'border-slate-200 text-slate-600 dark:border-slate-600 dark:text-slate-200 hover:border-slate-300'
-                          }`}
+                          className={`nb-toggle ${preferredColor === 'black' ? 'is-active' : ''}`}
                         >
                           Black
                         </button>
@@ -1188,22 +1169,19 @@ const App = () => {
                     </div>
 
                     {/* Option 2: Create Online */}
-                    <button
-                      onClick={createOnlineGame}
-                      className="w-full flex items-center p-4 rounded-xl border-2 border-slate-100 dark:border-slate-700 hover:border-green-500 dark:hover:border-green-500 hover:bg-green-50 dark:hover:bg-slate-700 transition-all group"
-                    >
-                      <div className="p-3 bg-green-100 dark:bg-green-900/50 rounded-full text-green-600 dark:text-green-400 mr-4 group-hover:scale-110 transition-transform">
+                    <button onClick={createOnlineGame} className="nb-option nb-option--success w-full flex items-center group">
+                      <div className="nb-icon-badge nb-icon-badge--success mr-4">
                         <Globe className="w-6 h-6" />
                       </div>
                       <div className="text-left">
-                        <h3 className="font-bold text-slate-900 dark:text-white">Create Online Game</h3>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Get a Game ID to share with a friend</p>
+                        <h3 className="nb-option-title">Create Online Game</h3>
+                        <p className="nb-muted text-xs">Get a Game ID to share with a friend</p>
                       </div>
                     </button>
 
                     {/* Option 3: Join Online */}
-                    <div className="p-4 rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                      <h3 className="font-bold text-slate-900 dark:text-white text-left mb-2 flex items-center gap-2">
+                    <div className="nb-card nb-card--soft p-4">
+                      <h3 className="nb-label text-left mb-2 flex items-center gap-2">
                         <Play className="w-4 h-4" /> Join Game
                       </h3>
                       <div className="flex gap-2">
@@ -1212,12 +1190,12 @@ const App = () => {
                           placeholder="Enter Game ID"
                           value={joinId}
                           onChange={(e) => setJoinId(e.target.value)}
-                          className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none dark:text-white"
+                          className="nb-input flex-1 font-mono"
                         />
                         <button
                           onClick={joinOnlineGame}
                           disabled={!joinId}
-                          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          className="nb-button nb-button--primary"
                         >
                           Join
                         </button>
@@ -1227,7 +1205,7 @@ const App = () => {
 
                   <button
                     onClick={() => setShowGameMenu(false)}
-                    className="mt-6 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-sm font-medium"
+                    className="nb-link mt-6"
                   >
                     Cancel
                   </button>
@@ -1250,7 +1228,7 @@ const App = () => {
                       key={`${displayR}-${displayC}`}
                       onClick={() => handleSquareClick(displayR, displayC)}
                       style={{ backgroundColor: getSquareColor(boardPos.r, boardPos.c) }}
-                      className="relative flex items-center justify-center cursor-pointer"
+                      className="nb-square relative flex items-center justify-center cursor-pointer"
                     >
                       {/* Rank/File Indicators */}
                       {displayC === 0 && displayR === 7 && (
@@ -1263,14 +1241,14 @@ const App = () => {
                         </span>
                       )}
 
-                      {isSelected && <div className="absolute inset-0 bg-yellow-400/40" />}
-                      {isValid && !piece && <div className="w-4 h-4 rounded-full bg-black/20 dark:bg-black/40" />}
+                      {isSelected && <div className="absolute inset-0 nb-square-selected" />}
+                      {isValid && !piece && <div className="nb-move-dot" />}
                       {isValid && piece && (
                         <div className="absolute inset-0">
-                          <div className="absolute top-0 left-0 w-3 h-3 border-t-4 border-l-4 border-black/20" />
-                          <div className="absolute top-0 right-0 w-3 h-3 border-t-4 border-r-4 border-black/20" />
-                          <div className="absolute bottom-0 left-0 w-3 h-3 border-b-4 border-l-4 border-black/20" />
-                          <div className="absolute bottom-0 right-0 w-3 h-3 border-b-4 border-r-4 border-black/20" />
+                          <div className="nb-corner nb-corner--tl" />
+                          <div className="nb-corner nb-corner--tr" />
+                          <div className="nb-corner nb-corner--bl" />
+                          <div className="nb-corner nb-corner--br" />
                         </div>
                       )}
                       {isCheckSquare && (
@@ -1293,35 +1271,33 @@ const App = () => {
             </div>
           </div>
 
-          <div className="bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-center shadow-inner gap-3 border-2 border-slate-300 dark:border-slate-600">
+          <div className="nb-status-bar p-4 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-3">
             <div className="flex items-center gap-3">
               <div
-                className={`w-3 h-3 rounded-full ${
-                  turn === 'white' ? 'bg-white border border-slate-300' : 'bg-slate-900 border border-slate-600'
-                }`}
+                className={`nb-turn-dot ${turn === 'white' ? 'is-white' : 'is-black'}`}
               ></div>
               <span className="font-semibold capitalize">{turn}'s Turn</span>
               {isSpectating && (
-                <span className="ml-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide bg-amber-200 text-amber-900 border border-amber-300 shadow-sm">
+                <span className="nb-chip">
                   <Eye className="w-3.5 h-3.5" /> Spectating
                 </span>
               )}
-              {check && !winner && <span className="text-red-500 font-bold ml-2 animate-pulse">CHECK!</span>}
+              {check && !winner && <span className="nb-check ml-2">CHECK!</span>}
             </div>
 
             {/* Game ID Display */}
             {!showGameMenu && (
-              <div className="flex items-center gap-2 bg-white dark:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-300 uppercase">ID:</span>
+              <div className="nb-id flex items-center gap-2 px-3 py-1.5 rounded-lg">
+                <span className="nb-label text-[11px]">ID:</span>
                 {gameId ? (
                   <>
-                    <span className="font-mono font-bold text-blue-600 dark:text-blue-400 tracking-wider">{gameId}</span>
-                    <button onClick={copyGameId} className="hover:text-blue-500 p-1">
+                    <span className="font-mono nb-id-value tracking-wider">{gameId}</span>
+                    <button onClick={copyGameId} className="nb-icon-button nb-icon-button--tiny">
                       <Copy className="w-3 h-3" />
                     </button>
                   </>
                 ) : (
-                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-300">- offline -</span>
+                  <span className="text-xs font-semibold nb-muted">- offline -</span>
                 )}
               </div>
             )}
@@ -1329,14 +1305,14 @@ const App = () => {
             {isSpectating ? (
               <button
                 onClick={exitSpectate}
-                className="text-sm font-semibold px-3 py-1.5 rounded-full bg-blue-500/90 dark:bg-blue-500/80 text-white flex items-center gap-1 transition-all hover:bg-blue-500 shadow-[0_2px_0_0_rgba(255,255,255,0.2)_inset,0_6px_14px_rgba(15,23,42,0.25)] border border-blue-300/60 hover:border-blue-200/80"
+                className="nb-button nb-button--primary nb-button--compact flex items-center gap-1"
               >
                 <ArrowRight className="w-4 h-4" /> Exit
               </button>
             ) : (
               <button
                 onClick={onNewGameClick}
-                className="text-sm font-semibold px-3 py-1.5 rounded-full bg-red-500/90 dark:bg-red-500/80 text-white flex items-center gap-1 transition-all hover:bg-red-500 shadow-[0_2px_0_0_rgba(255,255,255,0.2)_inset,0_6px_14px_rgba(15,23,42,0.25)] border border-red-300/60 hover:border-red-200/80"
+                className="nb-button nb-button--danger nb-button--compact flex items-center gap-1"
               >
                 <Flag className="w-4 h-4" /> New Game
               </button>
@@ -1346,34 +1322,32 @@ const App = () => {
 
         {/* --- RIGHT PANEL --- */}
         {showSettings && (
-          <div className="w-full md:w-80 flex flex-col gap-6 animate-in slide-in-from-right-10 fade-in duration-300">
+          <div className="nb-panel w-full md:w-80 flex flex-col gap-6 animate-in slide-in-from-right-10 fade-in duration-300">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Settings</h2>
+              <h2 className="nb-title text-xl">Settings</h2>
               <button
                 onClick={() => setShowSettings(false)}
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors"
+                className="nb-icon-button nb-icon-button--danger"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="bg-white/95 dark:bg-slate-800/95 text-slate-800 dark:text-slate-200 p-6 rounded-2xl shadow-sm backdrop-blur-md border-2 border-slate-300 dark:border-slate-600 space-y-6">
+            <div className="nb-card p-6 space-y-6">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <label className="nb-label flex items-center gap-2">
                   App Theme
                 </label>
                 <button
                   onClick={() => setDarkMode(!darkMode)}
-                  className={`p-2 rounded-full transition-colors ${
-                    darkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-200 text-slate-700'
-                  }`}
+                  className={`nb-icon-button nb-icon-button--toggle ${darkMode ? 'is-active' : ''}`}
                 >
                   {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                 </button>
               </div>
-              <hr className="border-slate-300 dark:border-slate-700" />
+              <hr className="nb-divider" />
               <div className="space-y-3">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <label className="nb-label flex items-center gap-2">
                   <Palette className="w-4 h-4" /> Board Theme
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1381,26 +1355,22 @@ const App = () => {
                     <button
                       key={key}
                       onClick={() => setBoardTheme(key)}
-                      className={`relative overflow-hidden h-12 rounded-lg border-2 transition-all flex items-center justify-center ${
-                        boardTheme === key
-                          ? 'border-blue-500 scale-105 shadow-md'
-                          : 'border-slate-300 dark:border-slate-600 hover:border-slate-400 opacity-70 hover:opacity-100'
-                      }`}
+                      className={`nb-swatch ${boardTheme === key ? 'is-active' : ''}`}
                     >
                       <div className="absolute inset-0 flex">
                         <div className="w-1/2 h-full" style={{ backgroundColor: theme.light }} />
                         <div className="w-1/2 h-full" style={{ backgroundColor: theme.dark }} />
                       </div>
-                      <span className="relative z-10 text-[10px] font-bold px-2 py-1 rounded bg-black/40 text-white backdrop-blur-sm">
+                      <span className="nb-swatch-label">
                         {theme.name}
                       </span>
                     </button>
                   ))}
                 </div>
               </div>
-              <hr className="border-slate-300 dark:border-slate-700" />
+              <hr className="nb-divider" />
               <div className="space-y-3">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <label className="nb-label flex items-center gap-2">
                   <LayoutGrid className="w-4 h-4" /> Piece Style
                 </label>
                 <div className="flex flex-col gap-2">
@@ -1408,11 +1378,7 @@ const App = () => {
                     <button
                       key={key}
                       onClick={() => setPieceTheme(key)}
-                      className={`flex items-center gap-3 p-2 rounded-lg border-2 transition-all text-slate-700 dark:text-slate-200 ${
-                        pieceTheme === key
-                          ? 'border-blue-500 bg-blue-50 dark:bg-slate-700'
-                          : 'border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 hover:border-slate-400'
-                      }`}
+                      className={`nb-choice flex items-center gap-3 ${pieceTheme === key ? 'is-active' : ''}`}
                     >
                       <div className="w-8 h-8 text-slate-800 dark:text-slate-200">
                         {React.createElement(Pieces[key].N, {
@@ -1426,7 +1392,7 @@ const App = () => {
                 </div>
               </div>
             </div>
-            <div className="text-xs text-center text-slate-400 dark:text-slate-500 mt-auto">
+            <div className="nb-footnote mt-auto">
               Lite version. En Passant & Castling coming soon.
             </div>
           </div>
