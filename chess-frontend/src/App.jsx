@@ -490,6 +490,7 @@ const App = () => {
   const [playerToken, setPlayerToken] = useState(null);
   const [playerColor, setPlayerColor] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [legalUciMoves, setLegalUciMoves] = useState([]);
   const [validUciMoves, setValidUciMoves] = useState([]);
   const [lastFEN, setLastFEN] = useState(null);
   const isSpectating = Boolean(gameId && !playerToken);
@@ -547,6 +548,7 @@ const App = () => {
       setBoard(nextBoard);
       setTurn(nextTurn);
       setLastFEN(nextFEN);
+      setLegalUciMoves([]);
     }
     setCheck(Boolean(data.flags?.inCheck));
     if (data.playerColor) {
@@ -639,6 +641,31 @@ const App = () => {
   }, [gameId, playerToken]);
 
   useEffect(() => {
+    if (!gameId || !playerToken) return;
+    if (!playerColor || playerColor !== turn) return;
+    if (legalUciMoves.length > 0) return;
+
+    let cancelled = false;
+    const loadLegalMoves = async () => {
+      try {
+        const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}/legal-moves`, {
+          headers: playerToken ? { 'X-Player-Token': playerToken } : {},
+        });
+        if (!cancelled) {
+          setLegalUciMoves(payload.moves || []);
+        }
+      } catch (e) {
+        if (!cancelled) console.error('Legal moves prefetch failed:', e);
+      }
+    };
+
+    loadLegalMoves();
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId, playerToken, playerColor, turn, legalUciMoves.length]);
+
+  useEffect(() => {
     const savedGameId = localStorage.getItem(GAME_ID_STORAGE_KEY);
     if (savedGameId) {
       setGameId(savedGameId);
@@ -703,29 +730,36 @@ const App = () => {
           setValidUciMoves([]);
         } else {
           setSelected({ r: boardPos.r, c: boardPos.c });
-          setIsLoading(true);
-          try {
-            const from = squareFromCoords(boardPos.r, boardPos.c);
-            const payload = await fetchJSON(
-              `/api/v1/games/${encodeURIComponent(gameId)}/legal-moves?from=${encodeURIComponent(from)}`,
-              { headers: playerToken ? { 'X-Player-Token': playerToken } : {} }
-            );
-            const uniqueTargets = new Map();
-            payload.moves.forEach((uci) => {
-              const target = uci.slice(2, 4);
-              if (!uniqueTargets.has(target)) {
-                uniqueTargets.set(target, coordsFromSquare(target));
-              }
-            });
-            setValidMoves([...uniqueTargets.values()]);
-            setValidUciMoves(payload.moves);
-          } catch (e) {
-            console.error('Legal moves fetch failed:', e);
-            setValidMoves([]);
-            setValidUciMoves([]);
-          } finally {
-            setIsLoading(false);
+          const from = squareFromCoords(boardPos.r, boardPos.c);
+          let availableMoves = legalUciMoves;
+          if (availableMoves.length === 0) {
+            setIsLoading(true);
+            try {
+              const payload = await fetchJSON(`/api/v1/games/${encodeURIComponent(gameId)}/legal-moves`, {
+                headers: playerToken ? { 'X-Player-Token': playerToken } : {},
+              });
+              availableMoves = payload.moves || [];
+              setLegalUciMoves(availableMoves);
+            } catch (e) {
+              console.error('Legal moves fetch failed:', e);
+              setValidMoves([]);
+              setValidUciMoves([]);
+              return;
+            } finally {
+              setIsLoading(false);
+            }
           }
+
+          const filteredMoves = availableMoves.filter((uci) => uci.startsWith(from));
+          const uniqueTargets = new Map();
+          filteredMoves.forEach((uci) => {
+            const target = uci.slice(2, 4);
+            if (!uniqueTargets.has(target)) {
+              uniqueTargets.set(target, coordsFromSquare(target));
+            }
+          });
+          setValidMoves([...uniqueTargets.values()]);
+          setValidUciMoves(filteredMoves);
         }
         return;
       }
@@ -765,6 +799,7 @@ const App = () => {
           setSelected(null);
           setValidMoves([]);
           setValidUciMoves([]);
+          setLegalUciMoves([]);
 
           if (isCapture) {
             captureSound.currentTime = 0;
@@ -836,6 +871,7 @@ const App = () => {
     setSelected(null);
     setValidMoves([]);
     setValidUciMoves([]);
+    setLegalUciMoves([]);
     setGameOverReason(null);
     setGameId(null); // Clear ID -> Go Local
     setLastFEN(null);
@@ -856,6 +892,7 @@ const App = () => {
     setSelected(null);
     setValidMoves([]);
     setValidUciMoves([]);
+    setLegalUciMoves([]);
     setGameOverReason(null);
     setGameId(null);
     setLastFEN(null);
@@ -976,6 +1013,7 @@ const App = () => {
         setSelected(null);
         setValidMoves([]);
         setValidUciMoves([]);
+        setLegalUciMoves([]);
       } catch (e) {
         console.error('Resign failed:', e);
       } finally {
