@@ -7,6 +7,7 @@ type Board struct {
 	enPassent Square
 	halfMove  int
 	fullMove  int
+	zkey      uint64
 
 	// positionCounts: make(map[string]int), #TODO: implement threefold repition draw
 }
@@ -41,6 +42,7 @@ func NewBoard() *Board {
 		fullMove:  1,
 	}
 	b.setupStartingPosition()
+	b.zkey = b.computeZobrist()
 	return b
 }
 
@@ -191,6 +193,7 @@ func (b *Board) MakeMove(move Move) error {
 	}
 
 	b.turn = b.turn.Opposite()
+	b.zkey = b.computeZobrist()
 
 	return nil
 }
@@ -228,6 +231,7 @@ func (b *Board) Clone() *Board {
 		enPassent: b.enPassent,
 		halfMove:  b.halfMove,
 		fullMove:  b.fullMove,
+		zkey:      b.zkey,
 	}
 
 	for i := range b.squares {
